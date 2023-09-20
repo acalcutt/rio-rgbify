@@ -339,13 +339,13 @@ class RGBTiler:
             "TILES_COL_Z integer, "
             "TILES_COL_X integer, "
             "TILES_COL_Y integer, "
-            "TILES_COL_DATA_ID integer "
+            "TILES_COL_DATA_ID text "
             ", primary key(TILES_COL_Z,TILES_COL_X,TILES_COL_Y) "
             ") without rowid;")
           
         cur.execute(
             "CREATE TABLE tiles_data ("
-            "tile_data_id integer primary key, "
+            "tile_data_id text primary key, "
             "tile_data blob "
             ");")
             
@@ -404,7 +404,6 @@ class RGBTiler:
             tiles = _make_tiles(constrained_bbox, "EPSG:4326", self.min_z, self.max_z)
 
         tilesCount = 0
-        hashlib = hashlib.md5()
         for tile, contents in self.pool.imap_unordered(self.run_function, tiles):
             x, y, z = tile
 
@@ -413,8 +412,8 @@ class RGBTiler:
             
             #create tile_id based on tile contents
             data = buffer(contents)
-            hashlib.update(contents)
-            tileDataId = hashlib.hexdigest()
+            hash = hashlib.sha1(contents.encode("UTF-8")).hexdigest()
+            tileDataId = hash[:10]
 
             # insert tile object
             cur.execute(
