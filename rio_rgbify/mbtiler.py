@@ -7,6 +7,7 @@ import math
 import traceback
 import itertools
 
+import hashlib
 import mercantile
 import rasterio
 import numpy as np
@@ -24,6 +25,7 @@ from rasterio.warp import reproject, transform_bounds
 from rasterio.enums import Resampling
 
 from rio_rgbify.encoders import data_to_rgb
+
 
 buffer = bytes if sys.version_info > (3,) else buffer
 
@@ -333,14 +335,32 @@ class RGBTiler:
 
         # create the tiles table
         cur.execute(
-            "CREATE TABLE tiles "
-            "(zoom_level integer, tile_column integer, "
-            "tile_row integer, tile_data blob);"
-        )
-
-        # create index on tiles for efficient access to this table
+            "CREATE TABLE tiles_shallow ("
+            "TILES_COL_Z integer, "
+            "TILES_COL_X integer, "
+            "TILES_COL_Y integer, "
+            "TILES_COL_DATA_ID integer "
+            ", primary key(TILES_COL_Z,TILES_COL_X,TILES_COL_Y) "
+            ") without rowid;")
+          
         cur.execute(
-            "CREATE UNIQUE  INDEX IF NOT EXISTS tile_index on tiles (zoom_level, tile_column, tile_row);")
+            "CREATE TABLE tiles_data ("
+            "tile_data_id integer primary key, "
+            "tile_data blob "
+            ");")
+            
+        cur.execute(
+            "CREATE VIEW tiles AS "
+            "select "
+            "tiles_shallow.TILES_COL_Z as zoom_level, "
+            "tiles_shallow.TILES_COL_X as tile_column, "
+            "tiles_shallow.TILES_COL_Y as tile_row, "
+            "tiles_data.tile_data as tile_data "
+            "from tiles_shallow "
+            "join tiles_data on tiles_shallow.TILES_COL_DATA_ID = tiles_data.tile_data_id;")
+
+        cur.execute(
+            "CREATE UNIQUE INDEX tiles_shallow_index on tiles_shallow (TILES_COL_Z, TILES_COL_X, TILES_COL_Y);")
 
         # create empty metadata
         cur.execute("CREATE TABLE metadata (name text, value text);")
@@ -384,19 +404,33 @@ class RGBTiler:
             tiles = _make_tiles(constrained_bbox, "EPSG:4326", self.min_z, self.max_z)
 
         tilesCount = 0
+        hashlib = hashlib.md5()
         for tile, contents in self.pool.imap_unordered(self.run_function, tiles):
             x, y, z = tile
 
             # mbtiles use inverse y indexing
             tiley = int(math.pow(2, z)) - y - 1
+            
+            #create tile_id based on tile contents
+            data = buffer(contents)
+            hashlib.update(contents)
+            tileDataId = hashlib.hexdigest()
 
             # insert tile object
             cur.execute(
-                "INSERT INTO tiles "
-                "(zoom_level, tile_column, tile_row, tile_data) "
-                "VALUES (?, ?, ?, ?);",
-                (z, x, tiley, buffer(contents)),
+                "INSERT OR IGNORE INTO tiles_data "
+                "(tile_data_id, tile_data) "
+                "VALUES (?, ?);",
+                (tileDataId, data),
             )
+
+            cur.execute(
+                "INSERT INTO tiles_shallow "
+                "(zoom_level, tile_column, tile_row, tile_data_id) "
+                "VALUES (?, ?, ?, ?);",
+                (z, x, tiley, tileDataId),
+            )
+
             tilesCount = tilesCount + 1
             # commit data every 1000 tiles (about 150 Mo)
             # Otherwise, the file .mbtiles-wal becomes huge (same size as the final file). The result is the need to have twice the size of the final Mbtiles on the hard drive
