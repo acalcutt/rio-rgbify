@@ -194,7 +194,7 @@ def _make_tiles(bbox, src_crs, minz, maxz):
         generator of [x, y, z] tiles that intersect
         the provided bounding box
     """
-    w, s, e, n = transform_bounds(*[src_crs, "EPSG:4326"] + bbox, densify_pts=21)
+    w, s, e, n = transform_bounds(*[src_crs, "EPSG:4326"] + bbox, densify_pts=2)
 
     EPSILON = 1.0e-10
 
