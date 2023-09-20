@@ -412,7 +412,7 @@ class RGBTiler:
             
             #create tile_id based on tile contents
             data = buffer(contents)
-            tileDataId = hashlib.sha1(contents).hexdigest()
+            tileDataId = hashlib.sha1(data).hexdigest()
 
             # insert tile object
             cur.execute(
