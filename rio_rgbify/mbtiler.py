@@ -421,7 +421,7 @@ class RGBTiler:
             
             #create tile_id based on tile contents
             data = buffer(contents)
-            tileDataId = self.fnv1a(data)
+            tileDataId = str(self.fnv1a(data))
 
             # insert tile object
             cur.execute(
