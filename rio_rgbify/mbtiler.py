@@ -7,7 +7,6 @@ import math
 import traceback
 import itertools
 
-import hashlib
 import mercantile
 import rasterio
 import numpy as np
