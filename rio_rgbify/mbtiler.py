@@ -313,6 +313,16 @@ class RGBTiler:
         if ext_t:
             traceback.print_exc()
 
+    def fnv1a(buf: bytes) -> int:
+        h = 14695981039346656037
+
+        for b in buf:
+            h ^= b
+            h *= 1099511628211
+            h &= 0xFFFFFFFFFFFFFFFF  # 64-bit mask
+
+        return h
+
     def run(self, processes=4):
         """
         Warp, encode, and tile
@@ -339,13 +349,13 @@ class RGBTiler:
             "TILES_COL_Z integer, "
             "TILES_COL_X integer, "
             "TILES_COL_Y integer, "
-            "TILES_COL_DATA_ID text "
+            "TILES_COL_DATA_ID integer "
             ", primary key(TILES_COL_Z,TILES_COL_X,TILES_COL_Y) "
             ") without rowid;")
           
         cur.execute(
             "CREATE TABLE tiles_data ("
-            "tile_data_id text primary key, "
+            "tile_data_id integer primary key, "
             "tile_data blob "
             ");")
             
@@ -412,7 +422,7 @@ class RGBTiler:
             
             #create tile_id based on tile contents
             data = buffer(contents)
-            tileDataId = hashlib.sha1(data).hexdigest()
+            tileDataId = fnv1a(data)
 
             # insert tile object
             cur.execute(
