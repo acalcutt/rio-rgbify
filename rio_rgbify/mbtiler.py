@@ -313,7 +313,7 @@ class RGBTiler:
         if ext_t:
             traceback.print_exc()
 
-    def fnv1a(buf: bytes) -> int:
+    def fnv1a(self, buf: bytes) -> int:
         h = 14695981039346656037
 
         for b in buf:
