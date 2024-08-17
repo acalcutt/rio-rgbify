@@ -50,7 +50,7 @@ def data_to_rgb(data, encoding, baseval, interval, round_digits=0):
         rgba[1] = np.floor(data % 256);
         rgba[2] = np.floor((data - np.floor(data)) * 256)
         
-        if ((rgba[0] == 128 and rgba[1] == 0 and rgba[2] == 0) or (rgba[0] == 127 and rgba[1] == 255 and rgba[2] == 0)).any():
+        if ((rgba[0] == 128 and rgba[1] == 0 and rgba[2] == 0).all() or (rgba[0] == 127 and rgba[1] == 255 and rgba[2] == 0).all()).any():
             rgba[0] = 0
             rgba[1] = 0
             rgba[2] = 0
@@ -63,7 +63,7 @@ def data_to_rgb(data, encoding, baseval, interval, round_digits=0):
         rgba[1] = (((data // 256) / 256) - ((data // 256) // 256)) * 256
         rgba[2] = ((data / 256) - (data // 256)) * 256
 
-        if ((rgba[0] == 1 and rgba[1] == 134 and rgba[2] == 160) or (rgba[0] == 1 and rgba[1] == 134 and rgba[2] == 150)).any():
+        if ((rgba[0] == 1 and rgba[1] == 134 and rgba[2] == 160).all() or (rgba[0] == 1 and rgba[1] == 134 and rgba[2] == 150).all()).any():
             rgba[0] = 0
             rgba[1] = 0
             rgba[2] = 0
