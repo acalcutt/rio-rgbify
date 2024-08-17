@@ -18,7 +18,7 @@ def test_encode_data_roundtrip():
     round_digits = 0
     encoding = "mapbox"
 
-    rtripped = _decode(data_to_rgb(testdata.copy(), encoding, baseval, interval, round_digits=round_digits), baseval, interval)
+    rtripped = _decode(data_to_rgb(testdata.copy(), encoding, baseval, interval, round_digits=round_digits), encoding, baseval, interval)
 
     assert testdata.min() == rtripped.min()
     assert testdata.max() == rtripped.max()

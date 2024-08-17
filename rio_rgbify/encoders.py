@@ -43,21 +43,38 @@ def data_to_rgb(data, encoding, baseval, interval, round_digits=0):
     if _range_check(datarange):
         raise ValueError("Data of {} larger than 256 ** 3".format(datarange))
 
-    rgb = np.zeros((3, rows, cols), dtype=np.uint8)
+    rgba = np.zeros((4, rows, cols), dtype=np.uint8)
 
     if(encoding == "terrarium"):
-        rgb[0] = data // 256
-        rgb[1] = np.floor(data % 256);
-        rgb[2] = np.floor((data - np.floor(data)) * 256)
+        rgba[0] = data // 256
+        rgba[1] = np.floor(data % 256);
+        rgba[2] = np.floor((data - np.floor(data)) * 256)
+        
+        if ((rgba[0] == 128 and rgba[1] == 0 and rgba[2] == 0) or (rgba[0] == 127 and rgba[1] == 255 and rgba[2] == 0)):
+            rgba[0] = 0
+            rgba[1] = 0
+            rgba[2] = 0
+            rgba[3] = 0
+        else:
+            rgba[3] = 255
+        
     else:
-        rgb[0] = ((((data // 256) // 256) / 256) - (((data // 256) // 256) // 256)) * 256
-        rgb[1] = (((data // 256) / 256) - ((data // 256) // 256)) * 256
-        rgb[2] = ((data / 256) - (data // 256)) * 256
+        rgba[0] = ((((data // 256) // 256) / 256) - (((data // 256) // 256) // 256)) * 256
+        rgba[1] = (((data // 256) / 256) - ((data // 256) // 256)) * 256
+        rgba[2] = ((data / 256) - (data // 256)) * 256
 
-    return rgb
+        if ((rgba[0] == 1 and rgba[1] == 134 and rgba[2] == 160) or (rgba[0] == 1 and rgba[1] == 134 and rgba[2] == 150)):
+            rgba[0] = 0
+            rgba[1] = 0
+            rgba[2] = 0
+            rgba[3] = 0
+        else:
+            rgba[3] = 255
+
+    return rgba
 
 
-def _decode(data, base, interval):
+def _decode(data, encoding, base, interval):
     """
     Utility to decode RGB encoded data
     """
