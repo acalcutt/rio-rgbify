@@ -1,9 +1,7 @@
 from __future__ import with_statement
 from __future__ import division
 
-import os
 import sys
-import math
 import traceback
 import itertools
 
@@ -23,7 +21,7 @@ from rasterio.warp import reproject, transform_bounds
 from rasterio.enums import Resampling
 
 from rio_rgbify.database import MBTilesDatabase
-from rio_rgbify.image import ImageEncoder, ImageFormat  # Import image encoding class
+from rio_rgbify.image import ImageEncoder
 
 buffer = bytes if sys.version_info > (3,) else buffer
 
