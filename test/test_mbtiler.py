@@ -8,6 +8,7 @@ import pytest
 import numpy as np
 from rasterio import Affine
 from rio_rgbify.mbtiler import (_encode_as_webp, _encode_as_png, _make_tiles, _tile_range, RGBTiler)
+from rio_rgbify.encoders import Encoder # Import the Encoder Class
 
 
 @given(

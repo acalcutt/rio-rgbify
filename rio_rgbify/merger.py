@@ -89,24 +89,6 @@ class TerrainRGBMerger:
             yield conn
         finally:
             conn.close()
-
-    def _decode_elevation(self, rgb: np.ndarray, encoding: EncodingType) -> np.ndarray:
-        """
-        Decode RGB values to elevation data based on specified encoding format and mask 0 and -1
-        """
-        r, g, b = rgb[0], rgb[1], rgb[2]
-
-        if encoding == EncodingType.TERRARIUM:
-            # Terrarium encoding: (red * 256 + green + blue / 256) - 32768
-            elevation = (r * 256 + g + b / 256) - 32768
-        else:
-            # Mapbox encoding: -10000 + ((R * 256 * 256 + G * 256 + B) * 0.1)
-            elevation = -10000 + ((r * 256 * 256 + g * 256 + b) * 0.1)
-        
-        # Mask 0 and -1 elevation values
-        mask = np.logical_or(elevation == 0, elevation == -1)
-
-        return np.where(mask, np.nan, elevation)
     
 
     def _decode_tile(self, tile_data: bytes, tile: mercantile.Tile, encoding: EncodingType) -> Tuple[Optional[np.ndarray], dict]:
@@ -134,7 +116,8 @@ class TerrainRGBMerger:
                     self.logger.error(f"Unexpected RGB shape in tile {tile.z}/{tile.x}/{tile.y}: {rgb.shape}")
                     return None, {}
 
-                elevation = self._decode_elevation(rgb, encoding)
+                elevation = Encoder._decode(rgb, -10000, 0.1, encoding.value) # Use the static decode method from the encoder
+                elevation = Encoder._mask_elevation(elevation)
                 
                 bounds = mercantile.bounds(tile)
                 meta = dataset.meta.copy()

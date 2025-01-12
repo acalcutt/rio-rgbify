@@ -50,15 +50,25 @@ class Encoder:
         return rgb
     
     @staticmethod
-    def _decode(data, base, interval, encoding):
+    def _decode(data: np.ndarray, base: float, interval: float, encoding: str) -> np.ndarray:
         """
         Utility to decode RGB encoded data
         """
         data = data.astype(np.float64)
         if(encoding == "terrarium"):
-            return (data[0] * 256 + data[1] + data[2] / 256) - 32768
+            elevation = (data[0] * 256 + data[1] + data[2] / 256) - 32768
         else:
-            return base + (((data[0] * 256 * 256) + (data[1] * 256) + data[2]) * interval)
+            elevation = base + (((data[0] * 256 * 256) + (data[1] * 256) + data[2]) * interval)
+        return elevation
+
+    @staticmethod
+    def _mask_elevation(elevation: np.ndarray) -> np.ndarray:
+      """
+      Mask 0 and -1 elevation values with NaN
+      """
+      mask = np.logical_or(elevation == 0, elevation == -1)
+      return np.where(mask, np.nan, elevation)
+    
 
     @staticmethod
     def _range_check(datarange):
