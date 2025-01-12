@@ -16,7 +16,7 @@ from rasterio.enums import Resampling
 
 def _rgb_worker(data, window, ij, g_args):
     return Encoder.data_to_rgb(
-        data[0][g_args["bidx"] - 1], g_args["encoding"], g_args["interval"], g_args["round_digits"]
+        data[0][g_args["bidx"] - 1], g_args["encoding"], g_args["interval"], g_args["round_digits"], g_args["base_val"]
     )
 
 
@@ -88,6 +88,12 @@ def cli():
     default="bilinear",
     help="Output tile resampling method (.mbtiles output only)",
 )
+@click.option(
+    "--quantized-alpha",
+    is_flag=True,
+    default=False,
+    help="If true, will add a quantized alpha channel to terrarium tiles (.mbtiles output only)",
+)
 @click.option("--workers", "-j", type=int, default=4, help="Workers to run [DEFAULT=4]")
 @click.option("--verbose", "-v", is_flag=True, default=False)
 @click.pass_context
@@ -106,6 +112,7 @@ def rgbify(
     bounding_tile,
     format,
     resampling,
+    quantized_alpha,
     workers,
     verbose,
     creation_options,
@@ -156,7 +163,8 @@ def rgbify(
             bounding_tile=bounding_tile,
             max_z=max_z,
             min_z=min_z,
-            resampling=resampling
+            resampling=resampling,
+            quantized_alpha=quantized_alpha
         ) as tiler:
             tiler.run(workers)
 
@@ -174,9 +182,15 @@ def rgbify(
     required=True,
     help="Path to the JSON configuration file",
 )
+@click.option(
+    "--output-quantized-alpha",
+    is_flag=True,
+    default=False,
+    help="If true, and output is terrarium, adds quantized alpha channel to output",
+)
 @click.option("--workers", "-j", type=int, default=4, help="Workers to run [DEFAULT=4]")
 @click.option("--verbose", "-v", is_flag=True, default=False)
-def merge(config, workers, verbose):
+def merge(config, output_quantized_alpha, workers, verbose):
     """Merges multiple MBTiles files into one."""
     with open(config, "r") as f:
         config_data = json.load(f)
@@ -204,7 +218,8 @@ def merge(config, workers, verbose):
         output_encoding = output_encoding,
         output_image_format = output_format,
         resampling = resampling,
-        processes = workers
+        processes = workers,
+        output_quantized_alpha = output_quantized_alpha
     )
     
     merger.process_all()

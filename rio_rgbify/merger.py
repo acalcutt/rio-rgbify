@@ -15,21 +15,20 @@ from contextlib import contextmanager
 from datetime import datetime
 from rio_rgbify.encoders import Encoder
 from rio_rgbify.database import MBTilesDatabase
-from rio_rgbify.image import  save_rgb_to_bytes, ImageFormat 
+from rio_rgbify.image import  save_rgb_to_bytes, ImageFormat
 
 class EncodingType(Enum):
     MAPBOX = "mapbox"
     TERRARIUM = "terrarium"
-
 
 @dataclass
 class MBTilesSource:
     """Configuration for an MBTiles source file"""
     path: Path
     encoding: EncodingType
-    height_adjustment: float = 0.0 # Added height adjustment
-    base_val: float = -10000 # Add base val, with default of -10000 for mapbox
-    interval: float = 0.1 # Add interval with default of 0.1 for mapbox
+    height_adjustment: float = 0.0
+    base_val: float = -10000
+    interval: float = 0.1
 
 @dataclass
 class ProcessTileArgs:
@@ -40,6 +39,7 @@ class ProcessTileArgs:
     output_encoding: EncodingType
     resampling: int
     output_image_format: ImageFormat
+    output_quantized_alpha: bool
 
 @dataclass
 class TileData:
@@ -60,7 +60,8 @@ class TerrainRGBMerger:
         resampling: int = Resampling.lanczos,
         processes: Optional[int] = None,
         default_tile_size: int = 512,
-        output_image_format: ImageFormat = ImageFormat.PNG
+        output_image_format: ImageFormat = ImageFormat.PNG,
+        output_quantized_alpha: bool = False
     ):
         """
         Initializes the TerrainRGBMerger.
@@ -81,6 +82,8 @@ class TerrainRGBMerger:
             The default tile size in pixels. Defaults to 512.
          output_image_format : ImageFormat, optional
             The output image format of the tiles. Defaults to ImageFormat.PNG
+        output_quantized_alpha : bool, optional
+            If set to true and using terrarium output encoding, the alpha channel will be populated with quantized data
         """
         print(f"__init__ called")
         self.sources = sources
@@ -91,6 +94,7 @@ class TerrainRGBMerger:
         self.logger = logging.getLogger(__name__)
         self.default_tile_size = default_tile_size
         self.output_image_format = output_image_format
+        self.output_quantized_alpha = output_quantized_alpha
 
     @contextmanager
     def _db_connection(self, db_path: Path):
@@ -271,13 +275,16 @@ class TerrainRGBMerger:
                 
                 #Apply the height adjustment
                 resampled_data += self.sources[i].height_adjustment
+
                 if result is None:
                     result = resampled_data
                 else:
                     mask = ~np.isnan(resampled_data)
                     if np.any(mask):
+                      if resampled_data.ndim == 2 or result.ndim == 2:
                         result[mask] = resampled_data[mask]
-                
+                      else:
+                        result[mask] = resampled_data[mask][:3] # take only the first 3 channels
         return result
             
 
@@ -370,7 +377,7 @@ class TerrainRGBMerger:
             
             if merged_elevation is not None:
                 # Encode using output format and save
-                rgb_data = Encoder.data_to_rgb(merged_elevation, self.output_encoding, 0.1, min_val=-10000, max_val=10000) # Use the encoder from the encoders.py file
+                rgb_data = Encoder.data_to_rgb(merged_elevation, self.output_encoding, 0.1, base_val=-10000, quantized_alpha=self.output_quantized_alpha if self.output_encoding == EncodingType.TERRARIUM else False) # Use the encoder from the encoders.py file
                 with MBTilesDatabase(self.output_path) as db:
                   image_bytes = save_rgb_to_bytes(rgb_data, self.output_image_format, self.default_tile_size)
                   db.insert_tile(tile = [tile.x, tile.y, tile.z], contents = image_bytes)
@@ -418,95 +425,97 @@ class TerrainRGBMerger:
           
           return list(tiles)
 
-    @staticmethod
-    def _process_tile_wrapper(args: ProcessTileArgs) -> None:
-        """Static wrapper method for parallel tile processing
-        
-        Parameters
-        ----------
-        args : ProcessTileArgs
-            The arguments for the processing of a tile
-        """
-        print(f"_process_tile_wrapper called with args: {args}")
-        try:
-            merger = TerrainRGBMerger(
-                sources=args.sources,
-                output_path=args.output_path,
-                output_encoding=args.output_encoding,
-                resampling=args.resampling,
-                processes=1,
-                default_tile_size=512,
-                output_image_format=args.output_image_format
-            )
-            merger.process_tile(args.tile)
-        except Exception as e:
-            logging.error(f"Error processing tile {args.tile}: {e}")
+        @staticmethod
+        def _process_tile_wrapper(args: ProcessTileArgs) -> None:
+            """Static wrapper method for parallel tile processing
+            
+            Parameters
+            ----------
+            args : ProcessTileArgs
+                The arguments for the processing of a tile
+            """
+            print(f"_process_tile_wrapper called with args: {args}")
+            try:
+                merger = TerrainRGBMerger(
+                    sources=args.sources,
+                    output_path=args.output_path,
+                    output_encoding=args.output_encoding,
+                    resampling=args.resampling,
+                    processes=1,
+                    default_tile_size=512,
+                    output_image_format=args.output_image_format,
+                    output_quantized_alpha=args.output_quantized_alpha
+                )
+                merger.process_tile(args.tile)
+            except Exception as e:
+                logging.error(f"Error processing tile {args.tile}: {e}")
 
-    def process_zoom_level(self, zoom: int):
-        """Process all tiles for a given zoom level in parallel
-        
-        Parameters
-        ----------
-        zoom : int
-            The zoom level to process
-        """
-        print(f"process_zoom_level called with zoom: {zoom}")
-        self.logger.info(f"Processing zoom level {zoom}")
-        
-        # Get list of tiles to process
-        tiles = self._get_tiles_for_zoom(zoom)
-        self.logger.info(f"Found {len(tiles)} tiles to process")
-        
-        # Prepare arguments for parallel processing
-        process_args = [
-            ProcessTileArgs(
-                tile=tile,
-                sources=self.sources,
-                output_path=self.output_path,
-                output_encoding=self.output_encoding,
-                resampling=self.resampling,
-                output_image_format = self.output_image_format
-            )
-            for tile in tiles
-        ]
-        
-        # Process tiles in parallel
-        with multiprocessing.Pool(self.processes) as pool:
-            for _ in pool.imap_unordered(self._process_tile_wrapper, process_args):
-                pass
+        def process_zoom_level(self, zoom: int):
+            """Process all tiles for a given zoom level in parallel
+            
+            Parameters
+            ----------
+            zoom : int
+                The zoom level to process
+            """
+            print(f"process_zoom_level called with zoom: {zoom}")
+            self.logger.info(f"Processing zoom level {zoom}")
+            
+            # Get list of tiles to process
+            tiles = self._get_tiles_for_zoom(zoom)
+            self.logger.info(f"Found {len(tiles)} tiles to process")
+            
+            # Prepare arguments for parallel processing
+            process_args = [
+                ProcessTileArgs(
+                    tile=tile,
+                    sources=self.sources,
+                    output_path=self.output_path,
+                    output_encoding=self.output_encoding,
+                    resampling=self.resampling,
+                    output_image_format = self.output_image_format,
+                    output_quantized_alpha=self.output_quantized_alpha
+                )
+                for tile in tiles
+            ]
+            
+            # Process tiles in parallel
+            with multiprocessing.Pool(self.processes) as pool:
+                for _ in pool.imap_unordered(self._process_tile_wrapper, process_args):
+                    pass
 
-    def get_max_zoom_level(self) -> int:
-        """Get the maximum zoom level from both sources
-        
-        Returns
-        -------
-        int
-            The maximum zoom level found in the sources.
-        """
-        print("_get_max_zoom_level called")
-        max_zoom = 0
-        for source in self.sources:
-            with self._db_connection(source.path) as conn:
-                cursor = conn.cursor()
-                cursor.execute("SELECT MAX(zoom_level) FROM tiles")
-                result = cursor.fetchone()
-                if result[0] is not None:
-                    max_zoom = max(max_zoom, result[0])
-        return max_zoom
+        def get_max_zoom_level(self) -> int:
+            """Get the maximum zoom level from both sources
+            
+            Returns
+            -------
+            int
+                The maximum zoom level found in the sources.
+            """
+            print("_get_max_zoom_level called")
+            max_zoom = 0
+            for source in self.sources:
+                with self._db_connection(source.path) as conn:
+                    cursor = conn.cursor()
+                    cursor.execute("SELECT MAX(zoom_level) FROM tiles")
+                    result = cursor.fetchone()
+                    if result[0] is not None:
+                        max_zoom = max(max_zoom, result[0])
+            return max_zoom
 
-    def process_all(self, min_zoom: int = 0):
-        """Process all zoom levels from min_zoom to max available
-        
-        Parameters
-        ----------
-        min_zoom : int, optional
-            The minimum zoom level to start processing at. Defaults to 0
-        """
-        print(f"process_all called with min_zoom: {min_zoom}")
-        max_zoom = self.get_max_zoom_level()
-        self.logger.info(f"Processing zoom levels {min_zoom} to {max_zoom}")
+        def process_all(self, min_zoom: int = 0):
+            """Process all zoom levels from min_zoom to max available
+            
+            Parameters
+            ----------
+            min_zoom : int, optional
+                The minimum zoom level to start processing at. Defaults to 0
+            """
+            print(f"process_all called with min_zoom: {min_zoom}")
+            max_zoom = self.get_max_zoom_level()
+            self.logger.info(f"Processing zoom levels {min_zoom} to {max_zoom}")
 
-        for zoom in range(min_zoom, max_zoom + 1):
-            self.process_zoom_level(zoom)
+            for zoom in range(min_zoom, max_zoom + 1):
+                self.process_zoom_level(zoom)
 
-        self.logger.info("Completed processing all zoom levels")
+            self.logger.info("Completed processing all zoom levels")

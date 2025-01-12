@@ -3,25 +3,19 @@
     {
       "path": "/path/to/base_terrain.mbtiles",
       "encoding": "mapbox",
-      "height_adjustment": 0,
-      "base_val": -10000,
-      "interval": 0.1
+      "height_adjustment": 0.0,
+       "base_val": -10000,
+       "interval": 0.1
     },
     {
       "path": "/path/to/secondary_terrain.mbtiles",
       "encoding": "terrarium",
-      "height_adjustment": 0
-    },
-    {
-      "path": "/path/to/bathymetry.mbtiles",
-      "encoding": "mapbox",
-      "height_adjustment": 0,
-      "base_val": -10000,
-      "interval": 0.1
+      "height_adjustment": 10.0
     }
   ],
   "output_path": "/path/to/output.mbtiles",
-   "output_encoding": "mapbox",
+  "output_encoding": "terrarium",
   "output_format": "webp",
-  "resampling": "bilinear"
+  "resampling": "bilinear",
+  "output_quantized_alpha": true
 }

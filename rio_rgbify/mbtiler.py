@@ -144,7 +144,7 @@ def _tile_worker(tile):
         resampling=global_args["resampling"], # Pass in global resampling variable
     )
 
-    out = Encoder.data_to_rgb(out, global_args["encoding"], global_args["interval"], global_args["round_digits"]) # Use static Encoder method
+    out = Encoder.data_to_rgb(out, global_args["encoding"], global_args["interval"], base_val=global_args["base_val"], round_digits=global_args["round_digits"], quantized_alpha=global_args["quantized_alpha"]) # Use static Encoder method and pass in base_val
 
     return tile, global_args["writer_func"](out, global_args["kwargs"].copy(), toaffine)
 
@@ -167,7 +167,7 @@ def _tile_range(min_tile, max_tile):
         iterator of [x, y, z] tiles
     """
     min_x, min_y, _ = min_tile
-    max_x, max_y, _ = max_tile
+    max_x, max_y, _ = maxtile
 
     return itertools.product(range(min_x, max_x + 1), range(min_y, max_y + 1))
 
@@ -251,6 +251,9 @@ class RGBTiler:
     resampling: str
         Resampling method to use (nearest, bilinear, cubic, cubic_spline, lanczos, average, mode, gauss)
         Default=bilinear
+    quantized_alpha: bool
+       If True, adds the quantized elevation data to alpha channel if using terrarium encoding
+        Default=False
 
 
     Returns
@@ -271,6 +274,7 @@ class RGBTiler:
         encoding="mapbox",
         bounding_tile=None,
         resampling="bilinear",
+        quantized_alpha=False,
         **kwargs
     ):
         self.run_function = _tile_worker
@@ -281,13 +285,13 @@ class RGBTiler:
         self.bounding_tile = bounding_tile
 
         if not "format" in kwargs:
-            writer_func = encode_as_png
+            writer_func = _encode_as_png
             self.image_format = "png"
         elif kwargs["format"].lower() == "png":
-            writer_func = encode_as_png
+            writer_func = _encode_as_png
             self.image_format = "png"
         elif kwargs["format"].lower() == "webp":
-            writer_func = encode_as_webp
+            writer_func = _encode_as_webp
             self.image_format = "webp"
         else:
             raise ValueError(
@@ -314,7 +318,9 @@ class RGBTiler:
             "round_digits": round_digits,
             "encoding": encoding,
             "writer_func": writer_func,
-            "resampling": self.resampling #added to the global args
+            "resampling": self.resampling,
+            "base_val": base_val,
+            "quantized_alpha": quantized_alpha,
         }
 
     def __enter__(self):
@@ -383,7 +389,6 @@ class RGBTiler:
             # Otherwise, the file .mbtiles-wal becomes huge (same size as the final file). The result is the need to have twice the size of the final Mbtiles on the hard drive
             if (tilesCount % 1000 == 0):
               self.db.conn.commit()
-
 
         self.db.conn.commit()
 

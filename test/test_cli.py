@@ -311,36 +311,294 @@ def test_bad_input_format():
 
 
 def test_merge_command():
+    runner = CliRunner()
+    with runner.isolated_filesystem():
+        # Create a sample config file
+        config_data = {
+            "sources": [
+                {"path": "test1.mbtiles", "encoding": "mapbox", "height_adjustment": 5},
+                {"path": "test2.mbtiles", "encoding": "terrarium", "height_adjustment": -10}
+                ],
+            "output_path": "merged.mbtiles",
+            "output_format": "webp",
+            "output_encoding": "mapbox",
+            "resampling": "bilinear",
+            "output_quantized_alpha": True
+        }
+        
+        with open("config.json", "w") as f:
+            json.dump(config_data, f)
+
+        # Create dummy mbtiles files
+        open("test1.mbtiles", "w").close()
+        open("test2.mbtiles", "w").close()
+
+        result = runner.invoke(
+            cli,
+            [
+                "merge",
+                "--config",
+                "config.json",
+                "--output-quantized-alpha",
+                "-j",
+                "1"
+            ]
+        )
+        assert result.exit_code == 0
+        assert os.path.exists("merged.mbtiles")
+        
+def test_merge_command_no_quantized():
+    runner = CliRunner()
+    with runner.isolated_filesystem():
+        # Create a sample config file
+        config_data = {
+            "sources": [
+                {"path": "test1.mbtiles", "encoding": "mapbox", "height_adjustment": 5},
+                {"path": "test2.mbtiles", "encoding": "terrarium", "height_adjustment": -10}
+                ],
+            "output_path": "merged.mbtiles",
+            "output_format": "png",
+            "output_encoding": "mapbox",
+            "resampling": "bilinear"
+        }
+        
+        with open("config.json", "w") as f:
+            json.dump(config_data, f)
+
+        # Create dummy mbtiles files
+        open("test1.mbtiles", "w").close()
+        open("test2.mbtiles", "w").close()
+
+        result = runner.invoke(
+            cli,
+            [
+                "merge",
+                "--config",
+                "config.json",
+                "-j",
+                 "1"
+            ]
+        )
+        assert result.exit_code == 0
+        assert os.path.exists("merged.mbtiles")
+
+
+def test_mbtiler_resampling_cli():
   runner = CliRunner()
   with runner.isolated_filesystem():
-    # Create a sample config file
-    config_data = {
-        "sources": [
-            {"path": "test1.mbtiles", "encoding": "mapbox", "height_adjustment": 5},
-            {"path": "test2.mbtiles", "encoding": "terrarium", "height_adjustment": -10}
-            ],
-        "output_path": "merged.mbtiles",
-        "output_format": "webp",
-        "output_encoding": "mapbox",
-        "resampling": "bilinear"
-      }
-    
-    with open("config.json", "w") as f:
-        json.dump(config_data, f)
-
-    # Create dummy mbtiles files
-    open("test1.mbtiles", "w").close()
-    open("test2.mbtiles", "w").close()
-
+    out_mbtiles = "output.mbtiles"
     result = runner.invoke(
-      cli,
+        rgbify,
         [
-          "merge",
-          "--config",
-          "config.json",
-          "-j",
-           "1"
-        ]
+            in_elev_src,
+            out_mbtiles,
+            "--min-z",
+            10,
+            "--max-z",
+            11,
+            "--format",
+            "png",
+            "--resampling",
+            "nearest",
+            "-j",
+            1,
+        ],
     )
     assert result.exit_code == 0
-    assert os.path.exists("merged.mbtiles")
+
+    result = runner.invoke(
+        rgbify,
+        [
+            in_elev_src,
+            out_mbtiles,
+            "--min-z",
+            10,
+            "--max-z",
+            11,
+            "--format",
+            "png",
+            "--resampling",
+            "bilinear",
+            "-j",
+            1,
+        ],
+    )
+    assert result.exit_code == 0
+
+    result = runner.invoke(
+        rgbify,
+        [
+            in_elev_src,
+            out_mbtiles,
+            "--min-z",
+            10,
+            "--max-z",
+            11,
+            "--format",
+            "png",
+            "--resampling",
+            "cubic",
+            "-j",
+            1,
+        ],
+    )
+    assert result.exit_code == 0
+    result = runner.invoke(
+        rgbify,
+        [
+            in_elev_src,
+            out_mbtiles,
+            "--min-z",
+            10,
+            "--max-z",
+            11,
+            "--format",
+            "png",
+            "--resampling",
+            "cubic_spline",
+             "-j",
+            1,
+        ],
+    )
+    assert result.exit_code == 0
+    result = runner.invoke(
+        rgbify,
+        [
+            in_elev_src,
+            out_mbtiles,
+            "--min-z",
+            10,
+            "--max-z",
+            11,
+            "--format",
+            "png",
+            "--resampling",
+            "lanczos",
+            "-j",
+             1,
+        ],
+    )
+    assert result.exit_code == 0
+    result = runner.invoke(
+        rgbify,
+        [
+            in_elev_src,
+            out_mbtiles,
+            "--min-z",
+            10,
+            "--max-z",
+            11,
+            "--format",
+            "png",
+            "--resampling",
+            "average",
+            "-j",
+            1,
+        ],
+    )
+    assert result.exit_code == 0
+    result = runner.invoke(
+        rgbify,
+        [
+            in_elev_src,
+            out_mbtiles,
+            "--min-z",
+            10,
+            "--max-z",
+            11,
+            "--format",
+            "png",
+             "--resampling",
+            "mode",
+            "-j",
+            1,
+        ],
+    )
+    assert result.exit_code == 0
+    result = runner.invoke(
+        rgbify,
+        [
+            in_elev_src,
+            out_mbtiles,
+            "--min-z",
+            10,
+            "--max-z",
+            11,
+            "--format",
+            "png",
+             "--resampling",
+            "gauss",
+            "-j",
+            1,
+        ],
+    )
+    assert result.exit_code == 0
+
+
+def test_mbtiler_quantized_alpha_cli():
+    runner = CliRunner()
+    with runner.isolated_filesystem():
+        out_mbtiles = "output.mbtiles"
+        result = runner.invoke(
+            rgbify,
+            [
+                in_elev_src,
+                out_mbtiles,
+                "--min-z",
+                10,
+                "--max-z",
+                11,
+                "--format",
+                "png",
+                "--encoding",
+                "terrarium",
+                 "--quantized-alpha",
+                "-j",
+                1,
+            ],
+        )
+        assert result.exit_code == 0
+        
+        result = runner.invoke(
+            rgbify,
+            [
+                in_elev_src,
+                out_mbtiles,
+                "--min-z",
+                10,
+                "--max-z",
+                11,
+                "--format",
+                "png",
+                "--encoding",
+                "terrarium",
+                 "-j",
+                 1,
+            ],
+        )
+        assert result.exit_code == 0
+        
+def test_mbtiler_baseval_cli():
+  runner = CliRunner()
+  with runner.isolated_filesystem():
+    out_mbtiles = "output.mbtiles"
+    result = runner.invoke(
+        rgbify,
+        [
+            in_elev_src,
+            out_mbtiles,
+            "--min-z",
+            10,
+            "--max-z",
+            11,
+            "--format",
+            "png",
+            "--encoding",
+            "mapbox",
+            "--base-val",
+            "-500",
+            "-j",
+            1,
+        ],
+    )
+    assert result.exit_code == 0

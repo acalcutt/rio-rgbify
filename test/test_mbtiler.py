@@ -1,15 +1,17 @@
 import mercantile
 import types
+import os
 
 from hypothesis import given
 import hypothesis.strategies as st
 import pytest
-
+import rasterio
 import numpy as np
 from rasterio import Affine
 from rio_rgbify.mbtiler import (_encode_as_webp, _encode_as_png, _make_tiles, _tile_range, RGBTiler)
-from rio_rgbify.encoders import Encoder # Import the Encoder Class
+from rio_rgbify.encoders import Encoder #Import Encoder
 
+in_elev_src = os.path.join(os.path.dirname(__file__), "fixtures", "elev.tif")
 
 @given(
     st.integers(
@@ -125,3 +127,46 @@ def test_RGBtiler_format_fails():
         with RGBTiler(test_in, test_out, test_minz, test_maxz,
             format='poo') as rtiler:
             pass
+
+def test_mbtiler_resampling():
+    
+    test_out = 'test_resampling.mbtiles'
+    test_in = os.path.join(os.path.dirname(__file__), "fixtures", "elev.tif")
+    test_minz = 0
+    test_maxz = 1
+    try:
+        with RGBTiler(test_in, test_out, test_minz, test_maxz, resampling='nearest') as rtiler:
+            rtiler.run(1)
+        with RGBTiler(test_in, test_out, test_minz, test_maxz, resampling='bilinear') as rtiler:
+            rtiler.run(1)
+        with RGBTiler(test_in, test_out, test_minz, test_maxz, resampling='cubic') as rtiler:
+            rtiler.run(1)
+        with RGBTiler(test_in, test_out, test_minz, test_maxz, resampling='cubic_spline') as rtiler:
+            rtiler.run(1)
+        with RGBTiler(test_in, test_out, test_minz, test_maxz, resampling='lanczos') as rtiler:
+            rtiler.run(1)
+        with RGBTiler(test_in, test_out, test_minz, test_maxz, resampling='average') as rtiler:
+            rtiler.run(1)
+        with RGBTiler(test_in, test_out, test_minz, test_maxz, resampling='mode') as rtiler:
+            rtiler.run(1)
+        with RGBTiler(test_in, test_out, test_minz, test_maxz, resampling='gauss') as rtiler:
+          rtiler.run(1)
+    finally:
+        if os.path.exists(test_out):
+          os.remove(test_out)
+
+
+def test_mbtiler_quantized_alpha():
+    
+    test_in = os.path.join(os.path.dirname(__file__), "fixtures", "elev.tif")
+    test_out = 'test_quantized.mbtiles'
+    test_minz = 0
+    test_maxz = 1
+    try:
+        with RGBTiler(test_in, test_out, test_minz, test_maxz, encoding="terrarium", format="png", quantized_alpha=True) as rtiler:
+            rtiler.run(1)
+        with RGBTiler(test_in, test_out, test_minz, test_maxz, encoding="terrarium", format="png", quantized_alpha=False) as rtiler:
+            rtiler.run(1)
+    finally:
+        if os.path.exists(test_out):
+           os.remove(test_out)
