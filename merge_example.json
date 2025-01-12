@@ -14,8 +14,11 @@
     }
   ],
   "output_path": "/path/to/output.mbtiles",
-  "output_encoding": "terrarium",
+  "output_encoding": "mapbox",
   "output_format": "webp",
   "resampling": "bilinear",
-  "output_quantized_alpha": true
+  "output_quantized_alpha": true,
+  "min_zoom": 2,
+  "max_zoom": 10,
+  "bounds": [-10,10,20,50]
 }

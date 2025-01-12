@@ -7,15 +7,13 @@ import numpy as np
 from riomucho import RioMucho
 import json
 from rasterio.rio.options import creation_options
-
-from rio_rgbify.encoders import Encoder
+from rasterio.enums import Resampling
 from rio_rgbify.mbtiler import RGBTiler
 from rio_rgbify.merger import TerrainRGBMerger, MBTilesSource, EncodingType, ImageFormat
-from rasterio.enums import Resampling
-
+from rio_rgbify.image import ImageEncoder
 
 def _rgb_worker(data, window, ij, g_args):
-    return Encoder.data_to_rgb(
+    return ImageEncoder.data_to_rgb(
         data[0][g_args["bidx"] - 1], g_args["encoding"], g_args["interval"], g_args["round_digits"], g_args["base_val"]
     )
 
@@ -34,14 +32,14 @@ def cli():
     "-b",
     type=float,
     default=0,
-    help="The base value of which to base the output encoding on [DEFAULT=0]",
+    help="The base value of which to base the output encoding on (Mapbox only) [DEFAULT=0]",
 )
 @click.option(
     "--interval",
     "-i",
     type=float,
     default=1,
-    help="Describes the precision of the output, by incrementing interval [DEFAULT=1]",
+    help="Describes the precision of the output, by incrementing interval (Mapbox only) [DEFAULT=1]",
 )
 @click.option(
     "--round-digits",
@@ -62,37 +60,37 @@ def cli():
     "--max-z",
     type=int,
     default=None,
-    help="Maximum zoom to tile (.mbtiles output only)",
+    help="Maximum zoom to tile",
 )
 @click.option(
     "--bounding-tile",
     type=str,
     default=None,
-    help="Bounding tile '[, , ]' to limit output tiles (.mbtiles output only)",
+    help="Bounding tile '[, , ]' to limit output tiles",
 )
 @click.option(
     "--min-z",
     type=int,
     default=None,
-    help="Minimum zoom to tile (.mbtiles output only)",
+    help="Minimum zoom to tile",
 )
 @click.option(
     "--format",
     type=click.Choice(["png", "webp"]),
     default="png",
-    help="Output tile format (.mbtiles output only)",
+    help="Output tile format",
 )
 @click.option(
     "--resampling",
     type=click.Choice(["nearest", "bilinear", "cubic", "cubic_spline", "lanczos", "average", "mode", "gauss"]),
     default="bilinear",
-    help="Output tile resampling method (.mbtiles output only)",
+    help="Output tile resampling method",
 )
 @click.option(
     "--quantized-alpha",
     is_flag=True,
     default=False,
-    help="If true, will add a quantized alpha channel to terrarium tiles (.mbtiles output only)",
+    help="If true, will add a quantized alpha channel to terrarium tiles (Terrarium Only)",
 )
 @click.option("--workers", "-j", type=int, default=4, help="Workers to run [DEFAULT=4]")
 @click.option("--verbose", "-v", is_flag=True, default=False)
@@ -182,15 +180,9 @@ def rgbify(
     required=True,
     help="Path to the JSON configuration file",
 )
-@click.option(
-    "--output-quantized-alpha",
-    is_flag=True,
-    default=False,
-    help="If true, and output is terrarium, adds quantized alpha channel to output",
-)
 @click.option("--workers", "-j", type=int, default=4, help="Workers to run [DEFAULT=4]")
 @click.option("--verbose", "-v", is_flag=True, default=False)
-def merge(config, output_quantized_alpha, workers, verbose):
+def merge(config, workers, verbose):
     """Merges multiple MBTiles files into one."""
     with open(config, "r") as f:
         config_data = json.load(f)
@@ -211,6 +203,21 @@ def merge(config, output_quantized_alpha, workers, verbose):
     output_encoding = EncodingType(config_data.get("output_encoding", "mapbox"))
     output_format = ImageFormat(config_data.get("output_format", "png"))
     resampling = Resampling(config_data.get("resampling","bilinear"))
+    output_quantized_alpha = config_data.get("output_quantized_alpha", False)
+    min_zoom = config_data.get("min_zoom", 0)
+    max_zoom = config_data.get("max_zoom", None)
+    bounds = config_data.get("bounds", None)
+    
+    if bounds is not None:
+        try:
+            bounds = [float(x) for x in bounds]
+            if len(bounds) != 4:
+                raise ValueError("Bounds must be a list of 4 floats in the order west, south, east, north")
+        except Exception:
+            raise TypeError(
+                "Bounding box of  is not valid, must be a comma seperated list of 4 floats in the order west, south, east, north".format(bounds)
+            )
+
 
     merger = TerrainRGBMerger(
         sources = sources,
@@ -219,7 +226,10 @@ def merge(config, output_quantized_alpha, workers, verbose):
         output_image_format = output_format,
         resampling = resampling,
         processes = workers,
-        output_quantized_alpha = output_quantized_alpha
+        output_quantized_alpha = output_quantized_alpha,
+        min_zoom = min_zoom,
+        max_zoom = max_zoom,
+        bounds = bounds
     )
     
-    merger.process_all()
+    merger.process_all(min_zoom=min_zoom if min_zoom is not None else 0)

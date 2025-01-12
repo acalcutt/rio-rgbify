@@ -1,5 +1,5 @@
 from __future__ import division
-from rio_rgbify.encoders import Encoder
+from rio_rgbify.image import ImageEncoder
 import numpy as np
 import pytest
 
@@ -18,7 +18,7 @@ def test_encode_data_roundtrip():
     round_digits = 0
     encoding = "mapbox"
 
-    rtripped = Encoder._decode(Encoder.data_to_rgb(testdata.copy(), encoding, interval, base_val=baseval, round_digits=round_digits), baseval, interval, encoding)
+    rtripped = ImageEncoder._decode(ImageEncoder.data_to_rgb(testdata.copy(), encoding, interval, base_val=baseval, round_digits=round_digits), baseval, interval, encoding)
 
     assert np.all(testdata == rtripped)
 
@@ -36,7 +36,7 @@ def test_encode_data_roundtrip_terrarium():
     encoding = "terrarium"
     baseval = 0 # terrarium uses a different offset
 
-    rtripped = Encoder._decode(Encoder.data_to_rgb(testdata.copy(), encoding, interval, base_val=baseval, round_digits=round_digits), baseval, interval, encoding)
+    rtripped = ImageEncoder._decode(ImageEncoder.data_to_rgb(testdata.copy(), encoding, interval, base_val=baseval, round_digits=round_digits), baseval, interval, encoding)
 
     assert np.all(testdata == rtripped)
 
@@ -54,7 +54,7 @@ def test_encode_data_roundtrip_baseval():
     round_digits = 0
     encoding = "mapbox"
 
-    rtripped = Encoder._decode(Encoder.data_to_rgb(testdata.copy(), encoding, interval, base_val=baseval, round_digits=round_digits), baseval, interval, encoding)
+    rtripped = ImageEncoder._decode(ImageEncoder.data_to_rgb(testdata.copy(), encoding, interval, base_val=baseval, round_digits=round_digits), baseval, interval, encoding)
 
     assert np.all(testdata == rtripped)
 
@@ -73,7 +73,7 @@ def test_encode_data_roundtrip_round_digits():
     round_digits = 2
     encoding = "mapbox"
 
-    rtripped = Encoder._decode(Encoder.data_to_rgb(testdata.copy(), encoding, interval, base_val=baseval, round_digits=round_digits), baseval, interval, encoding)
+    rtripped = ImageEncoder._decode(ImageEncoder.data_to_rgb(testdata.copy(), encoding, interval, base_val=baseval, round_digits=round_digits), baseval, interval, encoding)
 
     assert np.all(testdata == rtripped)
 
@@ -84,9 +84,9 @@ def test_encode_failrange():
     testdata[1] = 256 ** 3 + 1
 
     with pytest.raises(ValueError):
-        Encoder.data_to_rgb(testdata, "mapbox", 1, 0)
+        ImageEncoder.data_to_rgb(testdata, "mapbox", 1, 0)
 
 
 def test_catch_range():
-    assert Encoder._range_check(256 ** 3 + 1)
-    assert not Encoder._range_check(256 ** 3 - 1)
+    assert ImageEncoder._range_check(256 ** 3 + 1)
+    assert not ImageEncoder._range_check(256 ** 3 - 1)

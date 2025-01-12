@@ -9,7 +9,6 @@ import rasterio
 import numpy as np
 from rasterio import Affine
 from rio_rgbify.mbtiler import (_encode_as_webp, _encode_as_png, _make_tiles, _tile_range, RGBTiler)
-from rio_rgbify.encoders import Encoder #Import Encoder
 
 in_elev_src = os.path.join(os.path.dirname(__file__), "fixtures", "elev.tif")
 
@@ -130,8 +129,8 @@ def test_RGBtiler_format_fails():
 
 def test_mbtiler_resampling():
     
-    test_out = 'test_resampling.mbtiles'
     test_in = os.path.join(os.path.dirname(__file__), "fixtures", "elev.tif")
+    test_out = 'test_resampling.mbtiles'
     test_minz = 0
     test_maxz = 1
     try:

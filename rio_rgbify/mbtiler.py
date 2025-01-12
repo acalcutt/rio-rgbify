@@ -22,10 +22,8 @@ from rasterio.warp import reproject, transform_bounds
 
 from rasterio.enums import Resampling
 
-from rio_rgbify.encoders import Encoder  #Import Encoder class
 from rio_rgbify.database import MBTilesDatabase
-from rio_rgbify.image import encode_as_webp, encode_as_png # Import image encoding
-
+from rio_rgbify.image import ImageEncoder, ImageFormat  # Import image encoding class
 
 buffer = bytes if sys.version_info > (3,) else buffer
 
@@ -67,7 +65,7 @@ def _encode_as_webp(data, profile=None, affine=None):
         webp-encoded bytearray of the provided input data
     """
     with BytesIO() as f:
-        im = Image.fromarray(np.rollaxis(data, 0, 3))
+        im = Image.fromarray(np.moveaxis(data, 0, 3))
         im.save(f, format="webp", lossless=True)
 
         return f.getvalue()
@@ -144,7 +142,7 @@ def _tile_worker(tile):
         resampling=global_args["resampling"], # Pass in global resampling variable
     )
 
-    out = Encoder.data_to_rgb(out, global_args["encoding"], global_args["interval"], base_val=global_args["base_val"], round_digits=global_args["round_digits"], quantized_alpha=global_args["quantized_alpha"]) # Use static Encoder method and pass in base_val
+    out = ImageEncoder.data_to_rgb(out, global_args["encoding"], global_args["interval"], base_val=global_args["base_val"], round_digits=global_args["round_digits"], quantized_alpha=global_args["quantized_alpha"]) # Use static Encoder method and pass in base_val
 
     return tile, global_args["writer_func"](out, global_args["kwargs"].copy(), toaffine)
 
@@ -167,7 +165,7 @@ def _tile_range(min_tile, max_tile):
         iterator of [x, y, z] tiles
     """
     min_x, min_y, _ = min_tile
-    max_x, max_y, _ = maxtile
+    max_x, max_y, _ = max_tile
 
     return itertools.product(range(min_x, max_x + 1), range(min_y, max_y + 1))
 
@@ -351,6 +349,7 @@ class RGBTiler:
         with rasterio.open(self.inpath) as src:
             bbox = list(src.bounds)
             src_crs = src.crs
+        
 
         # populate metadata with required fields
         self.db.add_metadata({
@@ -389,6 +388,7 @@ class RGBTiler:
             # Otherwise, the file .mbtiles-wal becomes huge (same size as the final file). The result is the need to have twice the size of the final Mbtiles on the hard drive
             if (tilesCount % 1000 == 0):
               self.db.conn.commit()
+
 
         self.db.conn.commit()
 
