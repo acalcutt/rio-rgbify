@@ -23,7 +23,7 @@ from rasterio.warp import reproject, transform_bounds
 
 from rasterio.enums import Resampling
 
-from rio_rgbify.encoders import data_to_rgb
+from rio_rgbify.encoders import Encoder  #Import Encoder class
 
 
 buffer = bytes if sys.version_info > (3,) else buffer
@@ -143,7 +143,7 @@ def _tile_worker(tile):
         resampling=Resampling.bilinear,
     )
 
-    out = data_to_rgb(out, global_args["encoding"], global_args["base_val"], global_args["interval"], global_args["round_digits"])
+    out = Encoder.data_to_rgb(out, global_args["encoding"], global_args["interval"], global_args["round_digits"]) # Use static Encoder method
 
     return tile, global_args["writer_func"](out, global_args["kwargs"].copy(), toaffine)
 
@@ -285,10 +285,10 @@ class RGBTiler:
             self.image_format = "webp"
         else:
             raise ValueError(
-                "{0} is not a supported filetype!".format(kwargs["format"])
+                " is not a supported filetype!".format(kwargs["format"])
             )
 
-        # global kwargs not used if output  is webp
+        # global kwargs not used if output is webp
         self.global_args = {
             "kwargs": {
                 "driver": "PNG",
@@ -298,7 +298,6 @@ class RGBTiler:
                 "count": 3,
                 "crs": "EPSG:3857",
             },
-            "base_val": base_val,
             "interval": interval,
             "round_digits": round_digits,
             "encoding": encoding,
@@ -318,7 +317,7 @@ class RGBTiler:
         for b in buf:
             h ^= b
             h *= 1099511628211
-            h &= 0xFFFFFFFFFFFFFFFF  # 64-bit mask
+            h &= 0xFFFFFFFFFFFFFFFF # 64-bit mask
 
         return h
 
@@ -351,7 +350,7 @@ class RGBTiler:
             "TILES_COL_DATA_ID text "
             ", primary key(TILES_COL_Z,TILES_COL_X,TILES_COL_Y) "
             ") without rowid;")
-          
+            
         cur.execute(
             "CREATE TABLE tiles_data ("
             "tile_data_id text primary key, "
@@ -442,7 +441,7 @@ class RGBTiler:
             # commit data every 1000 tiles (about 150 Mo)
             # Otherwise, the file .mbtiles-wal becomes huge (same size as the final file). The result is the need to have twice the size of the final Mbtiles on the hard drive
             if (tilesCount % 1000 == 0):
-                conn.commit()
+              conn.commit()
 
         conn.commit()
 

@@ -1,0 +1,23 @@
+{
+  "sources": [
+    {
+      "path": "/path/to/base_terrain.mbtiles",
+      "encoding": "mapbox",
+      "height_adjustment": 0
+    },
+    {
+      "path": "/path/to/secondary_terrain.mbtiles",
+      "encoding": "terrarium",
+      "height_adjustment": 0
+    },
+    {
+      "path": "/path/to/bathymetry.mbtiles",
+      "encoding": "mapbox",
+      "height_adjustment": 0
+    }
+  ],
+  "output_path": "/path/to/output.mbtiles",
+   "output_encoding": "mapbox",
+  "output_format": "webp",
+  "resampling": "bilinear"
+}

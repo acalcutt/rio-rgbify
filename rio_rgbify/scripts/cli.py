@@ -10,6 +10,8 @@ from rasterio.rio.options import creation_options
 
 from rio_rgbify.encoders import data_to_rgb
 from rio_rgbify.mbtiler import RGBTiler
+from rio_rgbify.merger import TerrainRGBMerger, MBTilesSource, EncodingType, ImageFormat #Import the classes
+from rasterio.enums import Resampling
 
 
 def _rgb_worker(data, window, ij, g_args):
@@ -18,7 +20,13 @@ def _rgb_worker(data, window, ij, g_args):
     )
 
 
-@click.command("rgbify")
+@click.group(name="rgbify")
+def cli():
+    """Commands to generate rgb terrain tiles"""
+    pass
+
+
+@cli.command("rgbify")
 @click.argument("src_path", type=click.Path(exists=True))
 @click.argument("dst_path", type=click.Path(exists=False))
 @click.option(
@@ -148,3 +156,45 @@ def rgbify(
         raise ValueError(
             "{} output filetype not supported".format(dst_path.split(".")[-1])
         )
+
+
+@cli.command("merge")
+@click.option(
+    "--config",
+    "-c",
+    type=click.Path(exists=True),
+    required=True,
+    help="Path to the JSON configuration file",
+)
+@click.option("--workers", "-j", type=int, default=4, help="Workers to run [DEFAULT=4]")
+@click.option("--verbose", "-v", is_flag=True, default=False)
+def merge(config, workers, verbose):
+    """Merges multiple MBTiles files into one."""
+    with open(config, "r") as f:
+        config_data = json.load(f)
+
+    sources = []
+    for source_data in config_data.get("sources", []):
+        sources.append(
+            MBTilesSource(
+                path=Path(source_data["path"]),
+                encoding=EncodingType(source_data.get("encoding", "mapbox")),
+                height_adjustment=float(source_data.get("height_adjustment", 0.0))
+            )
+        )
+        
+    output_path = Path(config_data.get("output_path", "output.mbtiles"))
+    output_encoding = EncodingType(config_data.get("output_encoding", "mapbox"))
+    output_format = ImageFormat(config_data.get("output_format", "png"))
+    resampling = Resampling(config_data.get("resampling","bilinear"))
+
+    merger = TerrainRGBMerger(
+       sources = sources,
+       output_path = output_path,
+       output_encoding = output_encoding,
+       output_image_format = output_format,
+       resampling = resampling,
+       processes = workers
+    )
+    
+    merger.process_all()
