@@ -10,7 +10,6 @@ import itertools
 import mercantile
 import rasterio
 import numpy as np
-import sqlite3
 from multiprocessing import Pool
 from rasterio._io import virtual_file_to_buffer
 from riomucho.single_process_pool import MockTub
@@ -24,6 +23,8 @@ from rasterio.warp import reproject, transform_bounds
 from rasterio.enums import Resampling
 
 from rio_rgbify.encoders import Encoder  #Import Encoder class
+from rio_rgbify.database import MBTilesDatabase
+from rio_rgbify.image import encode_as_webp, encode_as_png # Import image encoding
 
 
 buffer = bytes if sys.version_info > (3,) else buffer
@@ -140,7 +141,7 @@ def _tile_worker(tile):
         out,
         dst_transform=toaffine,
         dst_crs="EPSG:3857",
-        resampling=Resampling.bilinear,
+        resampling=global_args["resampling"], # Pass in global resampling variable
     )
 
     out = Encoder.data_to_rgb(out, global_args["encoding"], global_args["interval"], global_args["round_digits"]) # Use static Encoder method
@@ -247,6 +248,10 @@ class RGBTiler:
         Default=png
     bounding_tile: list
         [x, y, z] of bounding tile; limits tiled output to this extent
+    resampling: str
+        Resampling method to use (nearest, bilinear, cubic, cubic_spline, lanczos, average, mode, gauss)
+        Default=bilinear
+
 
     Returns
     --------
@@ -265,6 +270,7 @@ class RGBTiler:
         round_digits=0,
         encoding="mapbox",
         bounding_tile=None,
+        resampling="bilinear",
         **kwargs
     ):
         self.run_function = _tile_worker
@@ -275,19 +281,25 @@ class RGBTiler:
         self.bounding_tile = bounding_tile
 
         if not "format" in kwargs:
-            writer_func = _encode_as_png
+            writer_func = encode_as_png
             self.image_format = "png"
         elif kwargs["format"].lower() == "png":
-            writer_func = _encode_as_png
+            writer_func = encode_as_png
             self.image_format = "png"
         elif kwargs["format"].lower() == "webp":
-            writer_func = _encode_as_webp
+            writer_func = encode_as_webp
             self.image_format = "webp"
         else:
             raise ValueError(
                 " is not a supported filetype!".format(kwargs["format"])
             )
-
+        
+        if resampling not in ["nearest", "bilinear", "cubic", "cubic_spline", "lanczos", "average", "mode", "gauss"]:
+          raise ValueError(
+            " is not a supported resampling method!".format(resampling)
+          )
+        
+        self.resampling = Resampling(resampling)
         # global kwargs not used if output is webp
         self.global_args = {
             "kwargs": {
@@ -302,14 +314,17 @@ class RGBTiler:
             "round_digits": round_digits,
             "encoding": encoding,
             "writer_func": writer_func,
+            "resampling": self.resampling #added to the global args
         }
 
     def __enter__(self):
+        self.db = MBTilesDatabase(self.outpath)
         return self
 
     def __exit__(self, ext_t, ext_v, trace):
         if ext_t:
             traceback.print_exc()
+        self.db.__exit__(ext_t, ext_v, trace)
 
     def fnv1a(self, buf: bytes) -> int:
         h = 14695981039346656037
@@ -331,66 +346,14 @@ class RGBTiler:
             bbox = list(src.bounds)
             src_crs = src.crs
 
-        # remove the output filepath if it exists
-        if os.path.exists(self.outpath):
-            os.unlink(self.outpath)
-
-        # create a connection to the mbtiles file
-        conn = sqlite3.connect(self.outpath)
-        # Wall mode : Speedup by 10 the speed of writing in the database
-        conn.execute('pragma journal_mode=wal')
-        cur = conn.cursor()
-
-        # create the tiles table
-        cur.execute(
-            "CREATE TABLE tiles_shallow ("
-            "TILES_COL_Z integer, "
-            "TILES_COL_X integer, "
-            "TILES_COL_Y integer, "
-            "TILES_COL_DATA_ID text "
-            ", primary key(TILES_COL_Z,TILES_COL_X,TILES_COL_Y) "
-            ") without rowid;")
-            
-        cur.execute(
-            "CREATE TABLE tiles_data ("
-            "tile_data_id text primary key, "
-            "tile_data blob "
-            ");")
-            
-        cur.execute(
-            "CREATE VIEW tiles AS "
-            "select "
-            "tiles_shallow.TILES_COL_Z as zoom_level, "
-            "tiles_shallow.TILES_COL_X as tile_column, "
-            "tiles_shallow.TILES_COL_Y as tile_row, "
-            "tiles_data.tile_data as tile_data "
-            "from tiles_shallow "
-            "join tiles_data on tiles_shallow.TILES_COL_DATA_ID = tiles_data.tile_data_id;")
-
-        cur.execute(
-            "CREATE UNIQUE INDEX tiles_shallow_index on tiles_shallow (TILES_COL_Z, TILES_COL_X, TILES_COL_Y);")
-
-        # create empty metadata
-        cur.execute("CREATE TABLE metadata (name text, value text);")
-
-        conn.commit()
-
         # populate metadata with required fields
-        cur.execute(
-            "INSERT INTO metadata " "(name, value) " "VALUES ('format', ?);",
-            (self.image_format,),
-        )
-
-        cur.execute("INSERT INTO metadata " "(name, value) " "VALUES ('name', '');")
-        cur.execute(
-            "INSERT INTO metadata " "(name, value) " "VALUES ('description', '');"
-        )
-        cur.execute("INSERT INTO metadata " "(name, value) " "VALUES ('version', '1');")
-        cur.execute(
-            "INSERT INTO metadata " "(name, value) " "VALUES ('type', 'baselayer');"
-        )
-
-        conn.commit()
+        self.db.add_metadata({
+            "format": self.image_format,
+            "name": "",
+            "description": "",
+            "version": "1",
+            "type": "baselayer"
+        })
 
         if processes == 1:
             # use mock pool for profiling / debugging
@@ -410,45 +373,19 @@ class RGBTiler:
         else:
             constrained_bbox = list(mercantile.bounds(self.bounding_tile))
             tiles = _make_tiles(constrained_bbox, "EPSG:4326", self.min_z, self.max_z)
-
+        
         tilesCount = 0
         for tile, contents in self.pool.imap_unordered(self.run_function, tiles):
-            x, y, z = tile
-
-            # mbtiles use inverse y indexing
-            tiley = int(math.pow(2, z)) - y - 1
-            
-            #create tile_id based on tile contents
-            data = buffer(contents)
-            tileDataId = str(self.fnv1a(data))
-
-            # insert tile object
-            cur.execute(
-                "INSERT OR IGNORE INTO tiles_data "
-                "(tile_data_id, tile_data) "
-                "VALUES (?, ?);",
-                (tileDataId, data),
-            )
-
-            cur.execute(
-                "INSERT INTO tiles_shallow "
-                "(TILES_COL_Z, TILES_COL_X, TILES_COL_Y, TILES_COL_DATA_ID) "
-                "VALUES (?, ?, ?, ?);",
-                (z, x, tiley, tileDataId),
-            )
+            self.db.insert_tile(tile, contents)
 
             tilesCount = tilesCount + 1
             # commit data every 1000 tiles (about 150 Mo)
             # Otherwise, the file .mbtiles-wal becomes huge (same size as the final file). The result is the need to have twice the size of the final Mbtiles on the hard drive
             if (tilesCount % 1000 == 0):
-              conn.commit()
+              self.db.conn.commit()
 
-        conn.commit()
 
-        # disable Wall mode
-        conn.execute('pragma journal_mode=DELETE')
-
-        conn.close()
+        self.db.conn.commit()
 
         self.pool.close()
         self.pool.join()

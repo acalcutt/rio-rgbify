@@ -3,7 +3,9 @@
     {
       "path": "/path/to/base_terrain.mbtiles",
       "encoding": "mapbox",
-      "height_adjustment": 0
+      "height_adjustment": 0,
+      "base_val": -10000,
+      "interval": 0.1
     },
     {
       "path": "/path/to/secondary_terrain.mbtiles",
@@ -13,7 +15,9 @@
     {
       "path": "/path/to/bathymetry.mbtiles",
       "encoding": "mapbox",
-      "height_adjustment": 0
+      "height_adjustment": 0,
+      "base_val": -10000,
+      "interval": 0.1
     }
   ],
   "output_path": "/path/to/output.mbtiles",

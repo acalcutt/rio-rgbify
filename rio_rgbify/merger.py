@@ -1,22 +1,11 @@
 import sqlite3
 import rasterio
 import mercantile
-from rasterio.warp import calculate_default_transform, reproject, Resampling
+from rasterio.warp import reproject, Resampling
 import numpy as np
-from shapely.geometry import Polygon, shape
-from shapely.ops import transform as geom_transform
-import pyproj
-import fiona
 import io
-from rasterio import mask
 from PIL import Image
-from io import BytesIO
-from osgeo import gdal
-import tempfile
 import multiprocessing
-import itertools
-import gc
-import os
 from pathlib import Path
 import logging
 from enum import Enum
@@ -24,16 +13,14 @@ from dataclasses import dataclass
 from typing import Optional, Tuple, List
 from contextlib import contextmanager
 from datetime import datetime
-from rio_rgbify.encoders import Encoder #Import the encoder class
-
+from rio_rgbify.encoders import Encoder
+from rio_rgbify.database import MBTilesDatabase
+from rio_rgbify.image import  save_rgb_to_bytes, ImageFormat 
 
 class EncodingType(Enum):
     MAPBOX = "mapbox"
     TERRARIUM = "terrarium"
 
-class ImageFormat(Enum):
-    PNG = "png"
-    WEBP = "webp"
 
 @dataclass
 class MBTilesSource:
@@ -41,6 +28,8 @@ class MBTilesSource:
     path: Path
     encoding: EncodingType
     height_adjustment: float = 0.0 # Added height adjustment
+    base_val: float = -10000 # Add base val, with default of -10000 for mapbox
+    interval: float = 0.1 # Add interval with default of 0.1 for mapbox
 
 @dataclass
 class ProcessTileArgs:
@@ -60,6 +49,9 @@ class TileData:
     source_zoom: int
 
 class TerrainRGBMerger:
+    """
+    A class to merge multiple Terrain RGB MBTiles files.
+    """
     def __init__(
         self,
         sources: List[MBTilesSource],
@@ -70,6 +62,26 @@ class TerrainRGBMerger:
         default_tile_size: int = 512,
         output_image_format: ImageFormat = ImageFormat.PNG
     ):
+        """
+        Initializes the TerrainRGBMerger.
+
+        Parameters
+        ----------
+        sources : List[MBTilesSource]
+            A list of MBTiles source configurations.
+        output_path : Path
+            The path to the output MBTiles file.
+        output_encoding : EncodingType, optional
+            The encoding for the output tiles. Defaults to EncodingType.MAPBOX.
+        resampling : int, optional
+            The resampling method to use during tile merging. Defaults to Resampling.lanczos.
+        processes : Optional[int], optional
+            The number of processes to use for parallel processing. Defaults to multiprocessing.cpu_count().
+        default_tile_size : int, optional
+            The default tile size in pixels. Defaults to 512.
+         output_image_format : ImageFormat, optional
+            The output image format of the tiles. Defaults to ImageFormat.PNG
+        """
         print(f"__init__ called")
         self.sources = sources
         self.output_path = Path(output_path)
@@ -82,7 +94,13 @@ class TerrainRGBMerger:
 
     @contextmanager
     def _db_connection(self, db_path: Path):
-        """Context manager for database connections"""
+        """Context manager for database connections
+        
+        Parameters
+        ----------
+        db_path : Path
+           The path to the database
+        """
         print(f"_db_connection called with db_path: {db_path}")
         conn = sqlite3.connect(db_path)
         try:
@@ -91,8 +109,26 @@ class TerrainRGBMerger:
             conn.close()
     
 
-    def _decode_tile(self, tile_data: bytes, tile: mercantile.Tile, encoding: EncodingType) -> Tuple[Optional[np.ndarray], dict]:
-        """Decode tile data using specified encoding format"""
+    def _decode_tile(self, tile_data: bytes, tile: mercantile.Tile, encoding: EncodingType, source: MBTilesSource) -> Tuple[Optional[np.ndarray], dict]:
+        """
+        Decode tile data using specified encoding format
+
+        Parameters
+        ----------
+        tile_data : bytes
+            The raw tile data.
+        tile : mercantile.Tile
+            The mercantile tile object.
+        encoding : EncodingType
+            The encoding used for the tile.
+        source : MBTilesSource
+           The MBTiles source.
+
+        Returns
+        -------
+        Tuple[Optional[np.ndarray], dict]
+            A tuple containing the decoded elevation data and metadata, or None, None if decoding fails.
+        """
         if not isinstance(tile_data, bytes) or len(tile_data) == 0:
             raise ValueError("Invalid tile data")
             
@@ -116,7 +152,13 @@ class TerrainRGBMerger:
                     self.logger.error(f"Unexpected RGB shape in tile {tile.z}/{tile.x}/{tile.y}: {rgb.shape}")
                     return None, {}
 
-                elevation = Encoder._decode(rgb, -10000, 0.1, encoding.value) # Use the static decode method from the encoder
+                if encoding == EncodingType.MAPBOX: # Pass in the base and interval if we are using mapbox
+                   elevation = Encoder._decode(rgb, source.base_val, source.interval, encoding.value) # Use the static decode method from the encoder
+                elif encoding == EncodingType.TERRARIUM:
+                   elevation = Encoder._decode(rgb, 0, 1, encoding.value) # Use the static decode method from the encoder
+                else:
+                  raise ValueError(f"Invalid encoding type: {encoding}")
+
                 elevation = Encoder._mask_elevation(elevation)
                 
                 bounds = mercantile.bounds(tile)
@@ -139,13 +181,30 @@ class TerrainRGBMerger:
             return None, {}
 
     def _extract_tile(self, source: MBTilesSource, zoom: int, x: int, y: int) -> Optional[TileData]:
-        """Extract and decode a tile, with fallback to parent tiles"""
+        """Extract and decode a tile, with fallback to parent tiles
+        
+        Parameters
+        ----------
+        source : MBTilesSource
+            The MBTiles source to use
+        zoom : int
+            The zoom level of the tile
+        x : int
+            The x index of the tile
+        y : int
+           The y index of the tile
+
+        Returns
+        -------
+        Optional[TileData]
+            TileData object or None if it cannot be extracted.
+        """
         #print(f"_extract_tile called with source: {source}, zoom: {zoom}, x: {x}, y: {y}")
         current_zoom = zoom
         current_x, current_y = x, y
 
         while current_zoom >= 0:
-            with self._db_connection(source.path) as conn:
+            with MBTilesDatabase._db_connection(source.path) as conn:
                 cursor = conn.cursor()
                 cursor.execute(
                     "SELECT tile_data FROM tiles WHERE zoom_level=? AND tile_column=? AND tile_row=?",
@@ -155,7 +214,7 @@ class TerrainRGBMerger:
                 
                 if result is not None:
                     try:
-                        data_meta = self._decode_tile(result[0], mercantile.Tile(current_x, current_y, current_zoom), source.encoding)
+                        data_meta = self._decode_tile(result[0], mercantile.Tile(current_x, current_y, current_zoom), source.encoding, source) #pass in source
                         #self.logger.debug(f"decoded data for {current_zoom}/{current_x}/{current_y}: data is {data_meta[0] is None}, meta is {data_meta[1] is None}")
                         if data_meta[0] is None:
                             return None
@@ -174,7 +233,20 @@ class TerrainRGBMerger:
         return None
 
     def _merge_tiles(self, tile_datas: List[Optional[TileData]], target_tile: mercantile.Tile) -> Optional[np.ndarray]:
-        """Merge tiles from multiple sources, handling upscaling and priorities"""
+        """Merge tiles from multiple sources, handling upscaling and priorities
+        
+        Parameters
+        ----------
+        tile_datas : List[Optional[TileData]]
+            A list of TileData objects
+        target_tile : mercantile.Tile
+            The mercantile tile object we are merging into
+        
+        Returns
+        -------
+        Optional[np.ndarray]
+            The merged elevation array, or None if no valid tiles to merge.
+        """
         #print(f"_merge_tiles called with tile_datas: {tile_datas}, target_tile: {target_tile}")
         if not any(tile_datas):
           return None
@@ -210,7 +282,24 @@ class TerrainRGBMerger:
             
 
     def _resample_if_needed(self, tile_data: TileData, target_tile: mercantile.Tile, target_transform, tile_size) -> np.ndarray:
-        """Resample tile data if source zoom differs from target"""
+        """Resample tile data if source zoom differs from target
+        
+        Parameters
+        ----------
+        tile_data : TileData
+            The tile data to resample
+        target_tile : mercantile.Tile
+            The mercantile tile object for the resampled data
+        target_transform
+            The transform for the target tile
+        tile_size
+            The size of the tile in pixels.
+
+        Returns
+        -------
+        np.ndarray
+            The resampled elevation array.
+        """
         #print(f"_resample_if_needed called with tile_data: {tile_data}, target_tile: {target_tile}")
         if tile_data.source_zoom != target_tile.z:
 
@@ -259,70 +348,50 @@ class TerrainRGBMerger:
            return tile_data.data
             
 
-        def process_tile(self, tile: mercantile.Tile) -> None:
-            """Process a single tile, merging data from multiple sources"""
-            #print(f"process_tile called with tile: {tile}")
-            try:
-                # Extract tiles from all sources
-                tile_datas = [self._extract_tile(source, tile.z, tile.x, tile.y) for source in self.sources]
+    def process_tile(self, tile: mercantile.Tile) -> None:
+        """Process a single tile, merging data from multiple sources.
+        
+        Parameters
+        ----------
+        tile : mercantile.Tile
+            The tile to process.
+        """
+        #print(f"process_tile called with tile: {tile}")
+        try:
+            # Extract tiles from all sources
+            tile_datas = [self._extract_tile(source, tile.z, tile.x, tile.y) for source in self.sources]
 
-                if not any(tile_datas):
-                  self.logger.debug(f"No data found for tile {tile.z}/{tile.x}/{tile.y}")
-                  return
+            if not any(tile_datas):
+              self.logger.debug(f"No data found for tile {tile.z}/{tile.x}/{tile.y}")
+              return
 
-                # Merge the elevation data
-                merged_elevation = self._merge_tiles(tile_datas, tile)
-                
-                if merged_elevation is not None:
-                    # Encode using output format and save
-                    rgb_data = Encoder.data_to_rgb(merged_elevation, self.output_encoding, 0.1, min_val=-10000, max_val=10000) # Use the encoder from the encoders.py file
-                    self._save_tile(tile, rgb_data)
-                    self.logger.info(f"Successfully processed tile {tile.z}/{tile.x}/{tile.y}")
-            except Exception as e:
-                self.logger.error(f"Error processing tile {tile.z}/{tile.x}/{tile.y}: {e}")
-                raise
-
-        def _save_tile(self, tile: mercantile.Tile, rgb_data: np.ndarray) -> None:
-            """Save processed tile to output MBTiles"""
-            #print(f"_save_tile called with tile: {tile}, rgb_data shape: {rgb_data.shape}")
-            with self._db_connection(self.output_path) as conn:
-                cursor = conn.cursor()
-
-                # Ensure table exists
-                cursor.execute("""
-                    CREATE TABLE IF NOT EXISTS tiles (
-                        zoom_level INTEGER,
-                        tile_column INTEGER,
-                        tile_row INTEGER,
-                        tile_data BLOB,
-                        PRIMARY KEY (zoom_level, tile_column, tile_row)
-                    )
-                """)
-                
-                # Convert the RGB array to the specified image format
-                if rgb_data.size > 0:
-                    if rgb_data.ndim == 3:
-                        image = Image.fromarray(np.moveaxis(rgb_data, 0, -1), 'RGB')
-                    else:
-                        tile_size = self.default_tile_size
-                        image = Image.fromarray(np.moveaxis(np.zeros((3,tile_size,tile_size),dtype=np.uint8), 0, -1), 'RGB')
-                    
-                    image_bytes = io.BytesIO()
-                    if self.output_image_format == ImageFormat.PNG:
-                        image.save(image_bytes, format='PNG')
-                    elif self.output_image_format == ImageFormat.WEBP:
-                        image.save(image_bytes, format='WEBP')
-                    image_bytes = image_bytes.getvalue()
-                    
-                    cursor.execute(
-                        "INSERT OR REPLACE INTO tiles (zoom_level, tile_column, tile_row, tile_data) VALUES (?, ?, ?, ?)",
-                        (tile.z, tile.x, tile.y, sqlite3.Binary(image_bytes))
-                    )
-                
-                conn.commit()
-
-        def _get_tiles_for_zoom(self, zoom: int) -> List[mercantile.Tile]:
-          """Get list of tiles to process for a given zoom level"""
+            # Merge the elevation data
+            merged_elevation = self._merge_tiles(tile_datas, tile)
+            
+            if merged_elevation is not None:
+                # Encode using output format and save
+                rgb_data = Encoder.data_to_rgb(merged_elevation, self.output_encoding, 0.1, min_val=-10000, max_val=10000) # Use the encoder from the encoders.py file
+                with MBTilesDatabase(self.output_path) as db:
+                  image_bytes = save_rgb_to_bytes(rgb_data, self.output_image_format, self.default_tile_size)
+                  db.insert_tile(tile = [tile.x, tile.y, tile.z], contents = image_bytes)
+                self.logger.info(f"Successfully processed tile {tile.z}/{tile.x}/{tile.y}")
+        except Exception as e:
+            self.logger.error(f"Error processing tile {tile.z}/{tile.x}/{tile.y}: {e}")
+            raise
+              
+    def _get_tiles_for_zoom(self, zoom: int) -> List[mercantile.Tile]:
+          """Get list of tiles to process for a given zoom level
+          
+          Parameters
+          ----------
+          zoom : int
+            The zoom level for which to get the tiles
+            
+          Returns
+          -------
+          List[mercantile.Tile]
+              A list of mercantile.Tile objects for the given zoom level
+          """
           print(f"_get_tiles_for_zoom called with zoom: {zoom}")
           tiles = set()
           
@@ -349,71 +418,95 @@ class TerrainRGBMerger:
           
           return list(tiles)
 
-        @staticmethod
-        def _process_tile_wrapper(args: ProcessTileArgs) -> None:
-            """Static wrapper method for parallel tile processing"""
-            print(f"_process_tile_wrapper called with args: {args}")
-            try:
-                merger = TerrainRGBMerger(
-                    sources=args.sources,
-                    output_path=args.output_path,
-                    output_encoding=args.output_encoding,
-                    resampling=args.resampling,
-                    processes=1,
-                    default_tile_size=512,
-                    output_image_format=args.output_image_format
-                )
-                merger.process_tile(args.tile)
-            except Exception as e:
-                logging.error(f"Error processing tile {args.tile}: {e}")
+    @staticmethod
+    def _process_tile_wrapper(args: ProcessTileArgs) -> None:
+        """Static wrapper method for parallel tile processing
+        
+        Parameters
+        ----------
+        args : ProcessTileArgs
+            The arguments for the processing of a tile
+        """
+        print(f"_process_tile_wrapper called with args: {args}")
+        try:
+            merger = TerrainRGBMerger(
+                sources=args.sources,
+                output_path=args.output_path,
+                output_encoding=args.output_encoding,
+                resampling=args.resampling,
+                processes=1,
+                default_tile_size=512,
+                output_image_format=args.output_image_format
+            )
+            merger.process_tile(args.tile)
+        except Exception as e:
+            logging.error(f"Error processing tile {args.tile}: {e}")
 
-        def process_zoom_level(self, zoom: int):
-            """Process all tiles for a given zoom level in parallel"""
-            print(f"process_zoom_level called with zoom: {zoom}")
-            self.logger.info(f"Processing zoom level {zoom}")
-            
-            # Get list of tiles to process
-            tiles = self._get_tiles_for_zoom(zoom)
-            self.logger.info(f"Found {len(tiles)} tiles to process")
-            
-            # Prepare arguments for parallel processing
-            process_args = [
-                ProcessTileArgs(
-                    tile=tile,
-                    sources=self.sources,
-                    output_path=self.output_path,
-                    output_encoding=self.output_encoding,
-                    resampling=self.resampling,
-                    output_image_format = self.output_image_format
-                )
-                for tile in tiles
-            ]
-            
-            # Process tiles in parallel
-            with multiprocessing.Pool(self.processes) as pool:
-                for _ in pool.imap_unordered(self._process_tile_wrapper, process_args):
-                    pass
+    def process_zoom_level(self, zoom: int):
+        """Process all tiles for a given zoom level in parallel
+        
+        Parameters
+        ----------
+        zoom : int
+            The zoom level to process
+        """
+        print(f"process_zoom_level called with zoom: {zoom}")
+        self.logger.info(f"Processing zoom level {zoom}")
+        
+        # Get list of tiles to process
+        tiles = self._get_tiles_for_zoom(zoom)
+        self.logger.info(f"Found {len(tiles)} tiles to process")
+        
+        # Prepare arguments for parallel processing
+        process_args = [
+            ProcessTileArgs(
+                tile=tile,
+                sources=self.sources,
+                output_path=self.output_path,
+                output_encoding=self.output_encoding,
+                resampling=self.resampling,
+                output_image_format = self.output_image_format
+            )
+            for tile in tiles
+        ]
+        
+        # Process tiles in parallel
+        with multiprocessing.Pool(self.processes) as pool:
+            for _ in pool.imap_unordered(self._process_tile_wrapper, process_args):
+                pass
 
-        def get_max_zoom_level(self) -> int:
-            """Get the maximum zoom level from both sources"""
-            print("_get_max_zoom_level called")
-            max_zoom = 0
-            for source in self.sources:
-                with self._db_connection(source.path) as conn:
-                    cursor = conn.cursor()
-                    cursor.execute("SELECT MAX(zoom_level) FROM tiles")
-                    result = cursor.fetchone()
-                    if result[0] is not None:
-                        max_zoom = max(max_zoom, result[0])
-            return max_zoom
+    def get_max_zoom_level(self) -> int:
+        """Get the maximum zoom level from both sources
+        
+        Returns
+        -------
+        int
+            The maximum zoom level found in the sources.
+        """
+        print("_get_max_zoom_level called")
+        max_zoom = 0
+        for source in self.sources:
+            with self._db_connection(source.path) as conn:
+                cursor = conn.cursor()
+                cursor.execute("SELECT MAX(zoom_level) FROM tiles")
+                result = cursor.fetchone()
+                if result[0] is not None:
+                    max_zoom = max(max_zoom, result[0])
+        return max_zoom
 
-        def process_all(self, min_zoom: int = 0):
-            """Process all zoom levels from min_zoom to max available"""
-            print(f"process_all called with min_zoom: {min_zoom}")
-            max_zoom = self.get_max_zoom_level()
-            self.logger.info(f"Processing zoom levels {min_zoom} to {max_zoom}")
+    def process_all(self, min_zoom: int = 0):
+        """Process all zoom levels from min_zoom to max available
+        
+        Parameters
+        ----------
+        min_zoom : int, optional
+            The minimum zoom level to start processing at. Defaults to 0
+        """
+        print(f"process_all called with min_zoom: {min_zoom}")
+        max_zoom = self.get_max_zoom_level()
+        self.logger.info(f"Processing zoom levels {min_zoom} to {max_zoom}")
 
-            for zoom in range(min_zoom, max_zoom + 1):
-                self.process_zoom_level(zoom)
+        for zoom in range(min_zoom, max_zoom + 1):
+            self.process_zoom_level(zoom)
 
-            self.logger.info("Completed processing all zoom levels")
+        self.logger.info("Completed processing all zoom levels")

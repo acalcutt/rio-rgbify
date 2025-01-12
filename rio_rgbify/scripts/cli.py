@@ -8,15 +8,15 @@ from riomucho import RioMucho
 import json
 from rasterio.rio.options import creation_options
 
-from rio_rgbify.encoders import data_to_rgb
+from rio_rgbify.encoders import Encoder
 from rio_rgbify.mbtiler import RGBTiler
-from rio_rgbify.merger import TerrainRGBMerger, MBTilesSource, EncodingType, ImageFormat #Import the classes
+from rio_rgbify.merger import TerrainRGBMerger, MBTilesSource, EncodingType, ImageFormat
 from rasterio.enums import Resampling
 
 
 def _rgb_worker(data, window, ij, g_args):
-    return data_to_rgb(
-        data[0][g_args["bidx"] - 1], g_args["encoding"], g_args["base_val"], g_args["interval"], g_args["round_digits"]
+    return Encoder.data_to_rgb(
+        data[0][g_args["bidx"] - 1], g_args["encoding"], g_args["interval"], g_args["round_digits"]
     )
 
 
@@ -68,7 +68,7 @@ def cli():
     "--bounding-tile",
     type=str,
     default=None,
-    help="Bounding tile '[{x}, {y}, {z}]' to limit output tiles (.mbtiles output only)",
+    help="Bounding tile '[, , ]' to limit output tiles (.mbtiles output only)",
 )
 @click.option(
     "--min-z",
@@ -81,6 +81,12 @@ def cli():
     type=click.Choice(["png", "webp"]),
     default="png",
     help="Output tile format (.mbtiles output only)",
+)
+@click.option(
+    "--resampling",
+    type=click.Choice(["nearest", "bilinear", "cubic", "cubic_spline", "lanczos", "average", "mode", "gauss"]),
+    default="bilinear",
+    help="Output tile resampling method (.mbtiles output only)",
 )
 @click.option("--workers", "-j", type=int, default=4, help="Workers to run [DEFAULT=4]")
 @click.option("--verbose", "-v", is_flag=True, default=False)
@@ -99,6 +105,7 @@ def rgbify(
     min_z,
     bounding_tile,
     format,
+    resampling,
     workers,
     verbose,
     creation_options,
@@ -149,6 +156,7 @@ def rgbify(
             bounding_tile=bounding_tile,
             max_z=max_z,
             min_z=min_z,
+            resampling=resampling
         ) as tiler:
             tiler.run(workers)
 
@@ -179,7 +187,9 @@ def merge(config, workers, verbose):
             MBTilesSource(
                 path=Path(source_data["path"]),
                 encoding=EncodingType(source_data.get("encoding", "mapbox")),
-                height_adjustment=float(source_data.get("height_adjustment", 0.0))
+                height_adjustment=float(source_data.get("height_adjustment", 0.0)),
+                base_val=float(source_data.get("base_val",-10000)),
+                interval=float(source_data.get("interval",0.1))
             )
         )
         
@@ -189,12 +199,12 @@ def merge(config, workers, verbose):
     resampling = Resampling(config_data.get("resampling","bilinear"))
 
     merger = TerrainRGBMerger(
-       sources = sources,
-       output_path = output_path,
-       output_encoding = output_encoding,
-       output_image_format = output_format,
-       resampling = resampling,
-       processes = workers
+        sources = sources,
+        output_path = output_path,
+        output_encoding = output_encoding,
+        output_image_format = output_format,
+        resampling = resampling,
+        processes = workers
     )
     
     merger.process_all()
