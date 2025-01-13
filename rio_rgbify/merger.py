@@ -442,9 +442,12 @@ class TerrainRGBMerger:
 
         # Process tiles in parallel using the standalone function
         with multiprocessing.Pool(self.processes) as pool:
-            for _ in pool.imap_unordered(functools.partial(_process_tile_task_with_instance, self), tasks, chunksize=1):
+            for _ in pool.imap_unordered(
+                _process_tile_task_with_instance,
+                [(self, task) for task in tasks], # this is what fixed it
+                chunksize=1
+            ):
                 pass
-
     def _get_tiles_for_zoom(self, zoom: int) -> List[mercantile.Tile]:
         """Get list of tiles to process for a given zoom level"""
         tiles = set()
@@ -558,5 +561,6 @@ def _tile_range(start: mercantile.Tile, stop: mercantile.Tile):
         for y in range(start.y, stop.y + 1):
             yield x, y
 
-def _process_tile_task_with_instance(merger_instance, task):
-        return process_tile_task(merger_instance, task)
+def _process_tile_task_with_instance(args):
+    merger_instance, task = args
+    return process_tile_task(merger_instance, task)
