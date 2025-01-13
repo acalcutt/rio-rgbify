@@ -7,7 +7,7 @@ import numpy as np
 from riomucho import RioMucho
 import json
 from rasterio.rio.options import creation_options
-from rasterio.warp import Resampling
+from rasterio.enums import Resampling
 from pathlib import Path
 from rio_rgbify.mbtiler import RGBTiler
 from rio_rgbify.merger import TerrainRGBMerger, MBTilesSource, EncodingType, ImageFormat
@@ -205,9 +205,9 @@ def merge(config, workers, verbose):
     output_encoding = EncodingType(config_data.get("output_encoding", "mapbox"))
     output_format = ImageFormat(config_data.get("output_format", "png"))
     resampling_str = config_data.get("resampling","bilinear")
-    if resampling_str not in ["nearest", "bilinear", "cubic", "cubic_spline", "lanczos", "average", "mode", "gauss"]:
+    if resampling_str.lower() not in ["nearest", "bilinear", "cubic", "cubic_spline", "lanczos", "average", "mode", "gauss"]:
       raise ValueError(f" is not a supported resampling method! {resampling_str}")
-    resampling = Resampling(resampling_str)
+    resampling = Resampling[resampling_str]
     output_quantized_alpha = config_data.get("output_quantized_alpha", False)
     min_zoom = config_data.get("min_zoom", 0)
     max_zoom = config_data.get("max_zoom", None)
