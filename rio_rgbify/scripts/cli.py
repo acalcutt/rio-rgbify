@@ -8,6 +8,7 @@ from riomucho import RioMucho
 import json
 from rasterio.rio.options import creation_options
 from rasterio.enums import Resampling
+from pathlib import Path
 from rio_rgbify.mbtiler import RGBTiler
 from rio_rgbify.merger import TerrainRGBMerger, MBTilesSource, EncodingType, ImageFormat
 from rio_rgbify.image import ImageEncoder
@@ -195,7 +196,8 @@ def merge(config, workers, verbose):
                 encoding=EncodingType(source_data.get("encoding", "mapbox")),
                 height_adjustment=float(source_data.get("height_adjustment", 0.0)),
                 base_val=float(source_data.get("base_val",-10000)),
-                interval=float(source_data.get("interval",0.1))
+                interval=float(source_data.get("interval",0.1)),
+                mask_values = config_data.get("mask_values",[0.0, -1.0])
             )
         )
         
@@ -217,7 +219,6 @@ def merge(config, workers, verbose):
             raise TypeError(
                 "Bounding box of  is not valid, must be a comma seperated list of 4 floats in the order west, south, east, north".format(bounds)
             )
-
 
     merger = TerrainRGBMerger(
         sources = sources,
