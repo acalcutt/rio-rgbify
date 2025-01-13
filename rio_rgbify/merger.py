@@ -400,17 +400,15 @@ class TerrainRGBMerger:
         return list(tiles)
 
     @staticmethod
-    def _process_tile_wrapper(args: ProcessTileArgs, write_queue: Queue) -> None:
-        """Static wrapper method for parallel tile processing
+    def _process_tile_with_queue(args_and_queue: tuple) -> None:
+        """Static wrapper method for parallel tile processing that includes queue
         
         Parameters
         ----------
-        args : ProcessTileArgs
-            The arguments for the processing of a tile
-        write_queue : Queue
-            The queue for writing processed tiles
+        args_and_queue : tuple
+            Tuple containing (ProcessTileArgs, Queue)
         """
-        print(f"_process_tile_wrapper called with args: {args}")
+        args, write_queue = args_and_queue
         try:
             merger = TerrainRGBMerger(
                 sources=args.sources,
@@ -421,19 +419,65 @@ class TerrainRGBMerger:
                 default_tile_size=512,
                 output_image_format=args.output_image_format,
                 output_quantized_alpha=args.output_quantized_alpha,
-                min_zoom = args.tile.z,
-                max_zoom = args.tile.z,
-                bounds = None
+                min_zoom=args.tile.z,
+                max_zoom=args.tile.z,
+                bounds=None
             )
             source_conns = {}
             for source in args.sources:
-              source_conns[source.path] = sqlite3.connect(source.path) # create a connection for each source.
-            merger.process_tile(args.tile, source_conns, write_queue) # Pass the connections and queue to process tile
+                source_conns[source.path] = sqlite3.connect(source.path)
+            merger.process_tile(args.tile, source_conns, write_queue)
             for conn in source_conns.values():
-              conn.close() #close the source connections when we are done.
+                conn.close()
         except Exception as e:
             logging.error(f"Error processing tile {args.tile}: {e}")
-    
+
+    def process_zoom_level(self, zoom: int):
+        """Process all tiles for a given zoom level in parallel
+        
+        Parameters
+        ----------
+        zoom : int
+            The zoom level to process
+        """
+        print(f"process_zoom_level called with zoom: {zoom}")
+        self.logger.info(f"Processing zoom level {zoom}")
+        
+        # Get list of tiles to process
+        tiles = self._get_tiles_for_zoom(zoom)
+        self.logger.info(f"Found {len(tiles)} tiles to process")
+        
+        # Prepare arguments for parallel processing
+        process_args = [
+            ProcessTileArgs(
+                tile=tile,
+                sources=self.sources,
+                output_path=self.output_path,
+                output_encoding=self.output_encoding,
+                resampling=self.resampling,
+                output_image_format=self.output_image_format,
+                output_quantized_alpha=self.output_quantized_alpha,
+            )
+            for tile in tiles
+        ]
+        
+        # Create args with queue pairs
+        args_with_queue = [(arg, self.write_queue) for arg in process_args]
+        
+        # Create the writer process
+        writer_process = multiprocessing.Process(target=self._writer_process, args=(self.write_queue,))
+        writer_process.start()
+
+        # Process tiles in parallel using the static method
+        with multiprocessing.Pool(self.processes) as pool:
+            for _ in pool.imap_unordered(self._process_tile_with_queue, args_with_queue, chunksize=1):
+                pass
+        
+        # Put the None value to stop the writer and wait for queue to empty
+        self.write_queue.put(None)
+        self.write_queue.join()
+        writer_process.join()
+
     def _writer_process(self, write_queue: Queue):
         """Writes to the db using a shared queue"""
         with MBTilesDatabase(self.output_path) as db:
