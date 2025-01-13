@@ -45,16 +45,16 @@ class TileData:
     source_zoom: int
 
 
-def process_tile_task(task_and_queue: Tuple[tuple, Queue]) -> None:
+def process_tile_task(task_args: Tuple) -> Optional[Tuple[mercantile.Tile, bytes]]:
     """Standalone function for processing tiles that can be pickled"""
-    (tile, sources, output_path, output_encoding, resampling, output_image_format, output_quantized_alpha,
-        source_encodings, height_adjustments, base_vals, intervals, mask_values), write_queue = task_and_queue
+    (tile, sources_config, output_path_str, output_encoding_str, resampling, output_image_format_str,
+     output_quantized_alpha, source_encodings_str, height_adjustments, base_vals, intervals, mask_values) = task_args
 
     try:
         # Reconstruct MBTilesSource objects
         sources = [
             MBTilesSource(
-                path=path,
+                path=Path(path),
                 encoding=EncodingType(encoding),
                 height_adjustment=height_adj,
                 base_val=base_val,
@@ -62,42 +62,44 @@ def process_tile_task(task_and_queue: Tuple[tuple, Queue]) -> None:
                 mask_values=mask_vals
             )
             for path, encoding, height_adj, base_val, interval, mask_vals in zip(
-                sources,
-                source_encodings,
+                sources_config,
+                source_encodings_str,
                 height_adjustments,
                 base_vals,
                 intervals,
                 mask_values
             )
         ]
-        
-        # Create merger instance
+
+        # Create merger instance (without the write queue)
         merger = TerrainRGBMerger(
             sources=sources,
-            output_path=output_path,
-            output_encoding=EncodingType(output_encoding),
+            output_path=Path(output_path_str),
+            output_encoding=EncodingType(output_encoding_str),
             resampling=resampling,
             processes=1,
             default_tile_size=512,
-            output_image_format=ImageFormat(output_image_format),
+            output_image_format=ImageFormat(output_image_format_str),
             output_quantized_alpha=output_quantized_alpha,
             min_zoom=tile.z,
             max_zoom=tile.z,
             bounds=None
         )
-        
+
         # Process the tile
         source_conns = {
             source.path: sqlite3.connect(source.path)
             for source in sources
         }
-        
-        merger.process_tile(tile, source_conns, write_queue)
-        
+
+        merged_data = merger.process_tile_data(tile, source_conns)
+
         # Clean up connections
         for conn in source_conns.values():
             conn.close()
-            
+
+        return tile, merged_data
+
     except Exception as e:
         logging.error(f"Error processing tile {tile}: {e}")
         raise
@@ -140,7 +142,7 @@ class TerrainRGBMerger:
         output_image_format : ImageFormat, optional
             The output image format of the tiles. Defaults to ImageFormat.PNG
         output_quantized_alpha : bool, optional
-        If set to true and using terrarium output encoding, the alpha channel will be populated with quantized data
+            If set to true and using terrarium output encoding, the alpha channel will be populated with quantized data
         min_zoom : int, optional
             The minimum zoom level to process tiles, defaults to 0.
         max_zoom : Optional[int], optional
@@ -161,8 +163,7 @@ class TerrainRGBMerger:
         self.min_zoom = min_zoom
         self.max_zoom = max_zoom
         self.bounds = bounds
-        self.write_queue = Queue() # initialize the shared queue
-    
+
     def _decode_tile(self, tile_data: bytes, tile: mercantile.Tile, encoding: EncodingType, source: MBTilesSource) -> Tuple[Optional[np.ndarray], dict]:
         """
         Decode tile data using specified encoding format
@@ -185,23 +186,23 @@ class TerrainRGBMerger:
         """
         if not isinstance(tile_data, bytes) or len(tile_data) == 0:
             raise ValueError("Invalid tile data")
-            
+
         try:
             # Log the size of the tile data to make sure it's non-empty
             #self.logger.debug(f"Tile data size for {tile.z}/{tile.x}/{tile.y}: {len(tile_data)} bytes")
-            
+
             # Convert the image to a PNG using Pillow
             image = Image.open(io.BytesIO(tile_data))
             image = image.convert('RGB')  # Force to RGB
             image_png = io.BytesIO()
             image.save(image_png, format='PNG', bits=8)
             image_png.seek(0)
-            
+
             with rasterio.open(image_png) as dataset:
                 # Check if we can read data properly
                 rgb = dataset.read(masked=False).astype(np.int32)
                 #self.logger.debug(f"Decoded tile RGB shape: {rgb.shape}, dtype: {rgb.dtype}")
-                
+
                 if rgb.ndim != 3 or rgb.shape[0] != 3:
                     self.logger.error(f"Unexpected RGB shape in tile {tile.z}/{tile.x}/{tile.y}: {rgb.shape}")
                     return None, {}
@@ -211,7 +212,7 @@ class TerrainRGBMerger:
 
                 #Apply height adjustment
                 elevation += source.height_adjustment
-                
+
                 bounds = mercantile.bounds(tile)
                 meta = dataset.meta.copy()
                 meta.update({
@@ -224,7 +225,7 @@ class TerrainRGBMerger:
                         meta['width'], meta['height']
                     )
                 })
-                
+
                 #self.logger.debug(f"Decoded elevation: min={np.nanmin(elevation)}, max={np.nanmax(elevation)}")
                 return elevation, meta
         except Exception as e:
@@ -233,7 +234,7 @@ class TerrainRGBMerger:
 
     def _extract_tile(self, source: MBTilesSource, zoom: int, x: int, y: int, source_conns: Dict[Path, sqlite3.Connection]) -> Optional[TileData]:
         """Extract and decode a tile, with fallback to parent tiles
-        
+
         Parameters
         ----------
         source : MBTilesSource
@@ -250,10 +251,10 @@ class TerrainRGBMerger:
         Optional[TileData]
             TileData object or None if it cannot be extracted.
         """
-        #print(f"_extract_tile called with source: {source}, zoom: {zoom}, x: {x}, y: {y}")
+        #print(f"_extract_tile called with source: , zoom: , x: , y: ")
         current_zoom = zoom
         current_x, current_y = x, y
-        
+
         while current_zoom >= 0:
             conn = source_conns[source.path] # get the database connection from the dictionary
             cursor = conn.cursor()
@@ -262,37 +263,37 @@ class TerrainRGBMerger:
                 (current_zoom, current_x, current_y)
             )
             result = cursor.fetchone()
-            
+
             if result is not None:
                 try:
                     data_meta = self._decode_tile(result[0], mercantile.Tile(current_x, current_y, current_zoom), source.encoding, source) #pass in source
-                    #self.logger.debug(f"decoded data for {current_zoom}/{current_x}/{current_y}: data is {data_meta[0] is None}, meta is {data_meta[1] is None}")
+                    #self.logger.debug(f"decoded data for //: data is {data_meta[0] is None}, meta is {data_meta[1] is None}")
                     if data_meta[0] is None:
                         return None
                     if data_meta[0].size == 0:
                        return None
                     return TileData(data_meta[0], data_meta[1], current_zoom)
                 except Exception as e:
-                    self.logger.error(f"Failed to decode tile {current_zoom}/{current_x}/{current_y}: {e}")
+                    self.logger.error(f"Failed to decode tile //: {e}")
                     return None
-            
+
             if current_zoom > 0:
                 current_x //= 2
                 current_y //= 2
             current_zoom -= 1
-        
+
         return None
 
     def _merge_tiles(self, tile_datas: List[Optional[TileData]], target_tile: mercantile.Tile) -> Optional[np.ndarray]:
         """Merge tiles from multiple sources, handling upscaling and priorities
-        
+
         Parameters
         ----------
         tile_datas : List[Optional[TileData]]
             A list of TileData objects
         target_tile : mercantile.Tile
             The mercantile tile object we are merging into
-        
+
         Returns
         -------
         Optional[np.ndarray]
@@ -300,12 +301,12 @@ class TerrainRGBMerger:
         """
         if not any(tile_datas):
             return None
-        
+
         result = None
         for i, tile_data in enumerate(tile_datas):
             if tile_data is not None:
                 resampled_data = self._resample_if_needed(tile_data, target_tile)
-                
+
                 if result is None:
                     result = resampled_data
                 else:
@@ -322,7 +323,7 @@ class TerrainRGBMerger:
 
     def _resample_if_needed(self, tile_data: TileData, target_tile: mercantile.Tile) -> np.ndarray:
         """Resample tile data if source zoom differs from target
-        
+
         Parameters
         ----------
         tile_data : TileData
@@ -335,7 +336,7 @@ class TerrainRGBMerger:
         np.ndarray
             The resampled elevation array.
         """
-        #print(f"_resample_if_needed called with tile_data: {tile_data}, target_tile: {target_tile}")
+        #print(f"_resample_if_needed called with tile_data: , target_tile: ")
         if tile_data.source_zoom == target_tile.z:
             if tile_data.data.ndim == 3:
                 return tile_data.data[0]
@@ -379,24 +380,23 @@ class TerrainRGBMerger:
                     )
 
                     if dst_data.ndim == 3:
-                       return dst_data[0]
+                        return dst_data[0]
                     else:
                         return dst_data
 
-    def process_tile(self, tile: mercantile.Tile, source_conns: Dict[Path, sqlite3.Connection], write_queue: Queue) -> None:
-        """Process a single tile, merging data from multiple sources"""
-        #print(f"process_tile called with tile: {tile}")
+    def process_tile_data(self, tile: mercantile.Tile, source_conns: Dict[Path, sqlite3.Connection]) -> Optional[bytes]:
+        """Process a single tile, merging data from multiple sources and return encoded bytes"""
         try:
             # Extract tiles from all sources
             tile_datas = [self._extract_tile(source, tile.z, tile.x, tile.y, source_conns) for source in self.sources]
 
             if not any(tile_datas):
                 self.logger.debug(f"No data found for tile {tile.z}/{tile.x}/{tile.y}")
-                return
+                return None
 
             # Merge the elevation data
             merged_elevation = self._merge_tiles(tile_datas, tile)
-            
+
             if merged_elevation is not None:
                 # Encode using output format and save
                 rgb_data = ImageEncoder.data_to_rgb(
@@ -407,29 +407,30 @@ class TerrainRGBMerger:
                     quantized_alpha=self.output_quantized_alpha if self.output_encoding == EncodingType.TERRARIUM else False
                 )
                 image_bytes = ImageEncoder.save_rgb_to_bytes(rgb_data, self.output_image_format, self.default_tile_size)
-                
-                write_queue.put((tile, image_bytes))
                 self.logger.info(f"Successfully processed tile {tile.z}/{tile.x}/{tile.y}")
+                return image_bytes
+            else:
+                return None
         except Exception as e:
             self.logger.error(f"Error processing tile {tile.z}/{tile.x}/{tile.y}: {e}")
-            raise
-        
+            return None
+
     def _get_tiles_for_zoom(self, zoom: int) -> List[mercantile.Tile]:
         """Get list of tiles to process for a given zoom level
-        
+
         Parameters
         ----------
         zoom : int
             The zoom level for which to get the tiles
-            
+
         Returns
         -------
         List[mercantile.Tile]
             A list of mercantile.Tile objects for the given zoom level
         """
-        print(f"_get_tiles_for_zoom called with zoom: {zoom}")
+        print(f"_get_tiles_for_zoom called with zoom: ")
         tiles = set()
-        
+
         if self.bounds is not None:
             w,s,e,n = self.bounds
             for x, y in _tile_range(mercantile.tile(w, n, zoom), mercantile.tile(e, s, zoom)):
@@ -439,20 +440,20 @@ class TerrainRGBMerger:
             source = self.sources[-1]
             mbtiles_db = MBTilesDatabase(source.path)
             rows = mbtiles_db.get_distinct_tiles(zoom)
-            
+
             if not rows:
                 self.logger.warning(f"No tiles found for zoom level {zoom} in source {source.path}")
             else:
-                #self.logger.debug(f"Rows fetched for zoom level {zoom}: {rows}")
+                #self.logger.debug(f"Rows fetched for zoom level : ")
                 for row in rows:
                     if isinstance(row, tuple) and len(row) == 2:
                         x, y = row
                         tiles.add(mercantile.Tile(x=x, y=y, z=zoom))
                     else:
                         self.logger.warning(f"Skipping invalid row: {row}")
-        
+
         return list(tiles)
-    
+
     def _writer_process(self, write_queue: Queue):
         """Writes to the db using a shared queue"""
         with MBTilesDatabase(self.output_path) as db:
@@ -468,47 +469,50 @@ class TerrainRGBMerger:
         """Process all tiles for a given zoom level in parallel"""
         print(f"process_zoom_level called with zoom: {zoom}")
         self.logger.info(f"Processing zoom level {zoom}")
-        
+
         # Get list of tiles to process
         tiles = self._get_tiles_for_zoom(zoom)
         self.logger.info(f"Found {len(tiles)} tiles to process")
-        
-        # Create task tuples
+
+        # Create a shared queue for writing to the database
+        write_queue = Queue()
+        writer_process = multiprocessing.Process(target=self._writer_process, args=(write_queue,))
+        writer_process.start()
+
+        # Prepare task arguments for the pool
         tasks = [
-          (
-            tile,
-            [source.path for source in self.sources],
-            self.output_path,
-            self.output_encoding.value,
-            self.resampling,
-            self.output_image_format.value,
-            self.output_quantized_alpha,
-            [source.encoding.value for source in self.sources],
-            [source.height_adjustment for source in self.sources],
-            [source.base_val for source in self.sources],
-            [source.interval for source in self.sources],
-            [source.mask_values for source in self.sources],
-          )
-          for tile in tiles
+            (
+                tile,
+                [source.path for source in self.sources],
+                str(self.output_path),
+                self.output_encoding.value,
+                self.resampling,
+                self.output_image_format.value,
+                self.output_quantized_alpha,
+                [source.encoding.value for source in self.sources],
+                [source.height_adjustment for source in self.sources],
+                [source.base_val for source in self.sources],
+                [source.interval for source in self.sources],
+                [source.mask_values for source in self.sources],
+            )
+            for tile in tiles
         ]
 
-        # Create the writer process
-        writer_process = multiprocessing.Process(target=self._writer_process, args=(self.write_queue,))
-        writer_process.start()
-        
-        # Process tiles in parallel using starmap, also passing the queue to each worker
+        # Process tiles in parallel
         with multiprocessing.Pool(self.processes) as pool:
-            for _ in pool.imap_unordered(process_tile_task, [(task, self.write_queue) for task in tasks], chunksize=1):
-                pass
+            for result in pool.imap_unordered(process_tile_task, tasks, chunksize=1):
+                if result:
+                    tile, image_bytes = result
+                    write_queue.put((tile, image_bytes))
 
-        # Clean up
-        self.write_queue.put(None)
-        self.write_queue.join()
+        # Signal the writer process to exit and wait for it
+        write_queue.put(None)
+        write_queue.join()
         writer_process.join()
 
     def get_max_zoom_level(self) -> int:
         """Get the maximum zoom level from the last source
-        
+
         Returns
         -------
         int
@@ -522,7 +526,7 @@ class TerrainRGBMerger:
 
     def process_all(self, min_zoom: int = 0):
         """Process all zoom levels from min_zoom to max available
-        
+
         Parameters
         ----------
         min_zoom : int, optional
