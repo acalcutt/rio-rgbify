@@ -41,4 +41,6 @@ setup(name="rio-rgbify",
       entry_points="""
       [rasterio.rio_plugins]
       rgbify=rio_rgbify.scripts.cli:rgbify
-      """)
+      merge=rio_rgbify.scripts.cli:merge
+      """
+     )
