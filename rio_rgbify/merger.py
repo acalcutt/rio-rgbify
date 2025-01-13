@@ -335,7 +335,7 @@ class TerrainRGBMerger:
                     else:
                         return dst_data
 
-    def process_tile(self, tile: mercantile.Tile, db: MBTilesDatabase, source_conns: Dict[Path, sqlite3.Connection]) -> None:
+    def process_tile(self, tile: mercantile.Tile, source_conns: Dict[Path, sqlite3.Connection]) -> None:
         """Process a single tile, merging data from multiple sources"""
         #print(f"process_tile called with tile: {tile}")
         try:
@@ -354,7 +354,7 @@ class TerrainRGBMerger:
                 rgb_data = ImageEncoder.data_to_rgb(merged_elevation, self.output_encoding, 0.1, base_val=-10000, quantized_alpha=self.output_quantized_alpha if self.output_encoding == EncodingType.TERRARIUM else False) # Use the encoder from the encoders.py file
                 image_bytes = ImageEncoder.save_rgb_to_bytes(rgb_data, self.output_image_format, self.default_tile_size)
                 
-                self.write_queue.put((tile, image_bytes))
+                self.write_queue.put((tile, image_bytes)) # Write to the queue
                 self.logger.info(f"Successfully processed tile {tile.z}/{tile.x}/{tile.y}")
         except Exception as e:
             self.logger.error(f"Error processing tile {tile.z}/{tile.x}/{tile.y}: {e}")
@@ -400,7 +400,7 @@ class TerrainRGBMerger:
         return list(tiles)
 
     @staticmethod
-    def _process_tile_wrapper(args: ProcessTileArgs) -> None:
+    def _process_tile_wrapper(args: ProcessTileArgs, write_queue: Queue) -> None:
         """Static wrapper method for parallel tile processing
         
         Parameters
@@ -426,8 +426,7 @@ class TerrainRGBMerger:
             source_conns = {}
             for source in args.sources:
               source_conns[source.path] = sqlite3.connect(source.path) # create a connection for each source.
-            with MBTilesDatabase(args.output_path) as db:
-              merger.process_tile(args.tile, db, source_conns) # Pass the connection to process tile
+            merger.process_tile(args.tile, source_conns) # Pass the connection to process tile
             for conn in source_conns.values():
               conn.close() #close the source connections when we are done.
         except Exception as e:
@@ -479,7 +478,7 @@ class TerrainRGBMerger:
 
         # Process tiles in parallel
         with multiprocessing.Pool(self.processes) as pool:
-            for _ in pool.imap_unordered(self._process_tile_wrapper, process_args):
+            for _ in pool.imap_unordered(self._process_tile_wrapper, process_args, [self.write_queue for _ in process_args]):
                 pass
         
         # Put the None value to stop the writer and wait for queue to empty
