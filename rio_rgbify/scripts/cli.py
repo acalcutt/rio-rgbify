@@ -205,7 +205,7 @@ def merge(config, workers, verbose):
     output_encoding = EncodingType(config_data.get("output_encoding", "mapbox"))
     output_format = ImageFormat(config_data.get("output_format", "png"))
     resampling_str = config_data.get("resampling","bilinear")
-    if resampling_str not in ["nearest", "bilinear", "cubic", "cubic_spline", "lanczos", "average", "mode", "gauss"]:
+    if resampling_str.lower() not in ["nearest", "bilinear", "cubic", "cubic_spline", "lanczos", "average", "mode", "gauss"]:
       raise ValueError(f" is not a supported resampling method! {resampling_str}")
     resampling = Resampling(resampling_str)
     output_quantized_alpha = config_data.get("output_quantized_alpha", False)
