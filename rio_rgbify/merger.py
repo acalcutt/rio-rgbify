@@ -410,17 +410,6 @@ class TerrainRGBMerger:
                         self.logger.warning(f"Skipping invalid row: {row}")
         
         return list(tiles)
-    
-    def _writer_process(self, write_queue: Queue):
-        """Writes to the db using a shared queue"""
-        with MBTilesDatabase(self.output_path) as db:
-            while True:
-                item = write_queue.get()
-                if item is None:
-                    break
-                tile, image_bytes = item
-                db.insert_tile([tile.x, tile.y, tile.z], image_bytes)
-                write_queue.task_done()
 
     def process_zoom_level(self, zoom: int):
         """Process all tiles for a given zoom level in parallel"""
