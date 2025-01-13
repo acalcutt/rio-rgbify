@@ -249,8 +249,7 @@ class ImageEncoder:
             bytes for a image encoded to the given output format
         """
         print(f"save_rgb_to_bytes called with rgb data shape {rgb_data.shape}")
-        print(f"rgbdata {rgb_data}")
-        image_bytes = BytesIO()
+        image_bytes = bytearray() # changed from BytesIO to bytearray
         if rgb_data.size > 0:
             try:
                 if rgb_data.ndim == 3:
@@ -264,17 +263,14 @@ class ImageEncoder:
                 print(f"image created with shape: {np.array(image).shape}")
                 
                 if output_image_format == ImageFormat.PNG:
-                  image.save(image_bytes, format='PNG')
+                    image.save(image_bytes, format='PNG')
                 elif output_image_format == ImageFormat.WEBP:
                     image.save(image_bytes, format='WEBP', lossless=True)
-                
-                
-                
-                image_bytes = image_bytes.getvalue()
+            
                 print(f"image_bytes size {len(image_bytes)}")
+                
             except Exception as e:
                 logging.error(f"Failed to encode image: {e}")
         else:
             print("rgb_data size is 0")
-
-        return image_bytes
+        return bytes(image_bytes) # return as bytestring
