@@ -361,7 +361,7 @@ class TerrainRGBMerger:
             )
             image_bytes = ImageEncoder.save_rgb_to_bytes(rgb_data, self.output_image_format, self.default_tile_size)
             
-            logging.debug(f"image_bytes {len(image_bytes)}")
+            print(f"image_bytes {len(image_bytes)}")
             write_queue.put((tile, image_bytes))
             self.logger.info(f"Successfully processed tile {tile.z}/{tile.x}/{tile.y}")
         except Exception as e:
@@ -555,14 +555,14 @@ def process_tile_task(task_tuple: tuple) -> None:
             tile_datas.append(tile_data)
 
         if not any(tile_datas):
-            logging.debug(f"No tile data for {tile.z}/{tile.x}/{tile.y}")
+            print(f"No tile data for {tile.z}/{tile.x}/{tile.y}")
             return
 
         # Merge the elevation data
         merged_elevation = merger_instance._merge_tiles(tile_datas, tile)
         
         if merged_elevation is None:
-            logging.debug(f"No merged elevation {tile.z}/{tile.x}/{tile.y}")
+            print(f"No merged elevation {tile.z}/{tile.x}/{tile.y}")
             return
         
         # Encode using output format
@@ -574,7 +574,7 @@ def process_tile_task(task_tuple: tuple) -> None:
             quantized_alpha=output_alpha
         )
         image_bytes = ImageEncoder.save_rgb_to_bytes(rgb_data, output_format)
-        logging.debug(f"image_bytes {len(image_bytes)}")
+        print(f"image_bytes {len(image_bytes)}")
         # Write to output database
         with MBTilesDatabase(output_path) as db:
            db.insert_tile([tile.x, tile.y, tile.z], image_bytes)
