@@ -42,62 +42,6 @@ def _main_worker(inpath, g_work_func, g_args):
 
     src = rasterio.open(inpath)
 
-
-def _encode_as_webp(data, profile=None, affine=None):
-    """
-    Uses BytesIO + PIL to encode a (3, 512, 512)
-    array into a webp bytearray.
-
-    Parameters
-    -----------
-    data: ndarray
-        (3 x 512 x 512) uint8 RGB array
-    profile: None
-        ignored
-    affine: None
-        ignored
-
-    Returns
-    --------
-    contents: bytearray
-        webp-encoded bytearray of the provided input data
-    """
-    with BytesIO() as f:
-        im = Image.fromarray(np.moveaxis(data, 0, 3))
-        im.save(f, format="webp", lossless=True)
-
-        return f.getvalue()
-
-
-def _encode_as_png(data, profile, dst_transform):
-    """
-    Uses rasterio's virtual file system to encode a (3, 512, 512)
-    array as a png-encoded bytearray.
-
-    Parameters
-    -----------
-    data: ndarray
-        (3 x 512 x 512) uint8 RGB array
-    profile: dictionary
-        dictionary of kwargs for png writing
-    affine: Affine
-        affine transform for output tile
-
-    Returns
-    --------
-    contents: bytearray
-        png-encoded bytearray of the provided input data
-    """
-    profile["affine"] = dst_transform
-
-    with rasterio.open("/vsimem/tileimg", "w", **profile) as dst:
-        dst.write(data)
-
-    contents = bytearray(virtual_file_to_buffer("/vsimem/tileimg"))
-
-    return contents
-
-
 def _tile_worker(tile):
     """
     For each tile, and given an open rasterio src, plus a`global_args` dictionary
@@ -281,13 +225,13 @@ class RGBTiler:
         self.bounding_tile = bounding_tile
 
         if not "format" in kwargs:
-            writer_func = _encode_as_png
+            writer_func = ImageEncoder.encode_as_png
             self.image_format = "png"
         elif kwargs["format"].lower() == "png":
-            writer_func = _encode_as_png
+            writer_func = ImageEncoder.encode_as_png
             self.image_format = "png"
         elif kwargs["format"].lower() == "webp":
-            writer_func = _encode_as_webp
+            writer_func = ImageEncoder.encode_as_webp
             self.image_format = "webp"
         else:
             raise ValueError(
@@ -328,21 +272,10 @@ class RGBTiler:
             traceback.print_exc()
         self.db.__exit__(ext_t, ext_v, trace)
 
-    def fnv1a(self, buf: bytes) -> int:
-        h = 14695981039346656037
-
-        for b in buf:
-            h ^= b
-            h *= 1099511628211
-            h &= 0xFFFFFFFFFFFFFFFF # 64-bit mask
-
-        return h
-
     def run(self, processes=4):
         """
         Warp, encode, and tile
         """
-
         # get the bounding box + crs of the file to tile
         with rasterio.open(self.inpath) as src:
             bbox = list(src.bounds)

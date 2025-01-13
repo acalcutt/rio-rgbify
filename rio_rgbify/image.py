@@ -42,42 +42,46 @@ class ImageEncoder:
             a uint8 (3 x rows x cols) or (4 x rows x cols) ndarray with the
             data encoded
         """
+        if not isinstance(data, np.ndarray):
+            raise ValueError("Input data must be a numpy array")
+
         data = data.astype(np.float64)
         if(encoding == "terrarium"):
             data = np.clip(data, -32768, 32767)
             data += 32768
         else:
+            data = data.copy()  # Create copy to avoid modifying input
             data -= base_val  # Apply offset
             data /= interval
             data = np.clip(data, -10000, 10000)
-           
 
         data = np.around(data / 2**round_digits) * 2**round_digits
 
         rows, cols = data.shape
         if quantized_alpha and encoding == "terrarium":
-          rgb = np.zeros((4, rows, cols), dtype=np.uint8)
-          mapping_table = ImageEncoder._generate_mapping_table()
-          
-          for row_index, row in enumerate(data):
-            for col_index, value in enumerate(row):
-                alpha_value = 255 - bisect.bisect_left(mapping_table, data[row_index][col_index] -32768)
-                rgb[3][row_index][col_index] = np.clip(alpha_value, 0, 255)
+            rgb = np.zeros((4, rows, cols), dtype=np.uint8)
+            mapping_table = ImageEncoder._generate_mapping_table()
+            
+            # Vectorized alpha calculation
+            alpha_values = np.zeros((rows, cols), dtype=np.uint8)
+            for i, threshold in enumerate(mapping_table):
+                alpha_values[data - 32768 > threshold] = 255 - i
+            rgb[3] = np.clip(alpha_values, 0, 255)
 
-          rgb[0] = data // 256
-          rgb[1] = np.floor(data % 256)
-          rgb[2] = np.floor((data - np.floor(data)) * 256)
-          return rgb
-        else:
-          rgb = np.zeros((3, rows, cols), dtype=np.uint8)
-          if(encoding == "terrarium"):
             rgb[0] = data // 256
             rgb[1] = np.floor(data % 256)
             rgb[2] = np.floor((data - np.floor(data)) * 256)
-          else:
-            rgb[0] = ((((data // 256) // 256) / 256) - (((data // 256) // 256) // 256)) * 256
-            rgb[1] = (((data // 256) / 256) - ((data // 256) // 256)) * 256
-            rgb[2] = ((data / 256) - (data // 256)) * 256
+            return rgb
+        else:
+            rgb = np.zeros((3, rows, cols), dtype=np.uint8)
+            if(encoding == "terrarium"):
+                rgb[0] = data // 256
+                rgb[1] = np.floor(data % 256)
+                rgb[2] = np.floor((data - np.floor(data)) * 256)
+            else:
+                rgb[0] = ((((data // 256) // 256) / 256) - (((data // 256) // 256) // 256)) * 256
+                rgb[1] = (((data // 256) / 256) - ((data // 256) // 256)) * 256
+                rgb[2] = ((data / 256) - (data // 256)) * 256
 
         return rgb
     
@@ -85,6 +89,22 @@ class ImageEncoder:
     def _decode(data: np.ndarray, base: float, interval: float, encoding: str) -> np.ndarray:
         """
         Utility to decode RGB encoded data
+
+        Parameters
+        ----------
+        data: np.ndarray
+            RGB data to decode
+        base: float
+            Base value for mapbox encoding
+        interval: float
+            Interval value for mapbox encoding
+        encoding: str
+            Encoding type ('terrarium' or 'mapbox')
+
+        Returns
+        -------
+        np.ndarray
+            Decoded elevation data
         """
         data = data.astype(np.float64)
         if(encoding == "terrarium"):
@@ -96,32 +116,45 @@ class ImageEncoder:
     def _mask_elevation(elevation: np.ndarray, mask_values: list = [0.0]) -> np.ndarray:
         """
         Mask specific elevation values with NaN
+
+        Parameters
+        ----------
+        elevation: np.ndarray
+            Elevation data array
+        mask_values: list
+            List of values to mask with NaN. Default is [0.0]
+
+        Returns
+        -------
+        np.ndarray
+            Masked elevation array
         """
         mask = np.zeros_like(elevation, dtype=bool)
         for mask_value in mask_values:
-          mask = np.logical_or(mask, elevation == mask_value)
+            mask = np.logical_or(mask, elevation == mask_value)
         return np.where(mask, np.nan, elevation)
     
-
     @staticmethod
     def _range_check(datarange):
         """
         Utility to check if data range is outside of precision for 3 digit base 256
         """
         maxrange = 256 ** 3
-
         return datarange > maxrange
     
     @staticmethod
     def _generate_mapping_table():
+        """
+        Generate elevation mapping table for alpha channel quantization
+        """
         table = []
         for i in range(0, 11):
             table.append(-11000 + i * 1000)
         table.append(-100)
-        table.append( -50)
-        table.append( -20)
-        table.append( -10)
-        table.append(  -1)
+        table.append(-50)
+        table.append(-20)
+        table.append(-10)
+        table.append(-1)
         for i in range(0, 150):
             table.append(20 * i)
         for i in range(0, 60):
@@ -129,7 +162,6 @@ class ImageEncoder:
         for i in range(0, 29):
             table.append(6000 + 100 * i)
         return table
-
 
     @staticmethod
     def encode_as_webp(data, profile=None, affine=None):
@@ -152,17 +184,15 @@ class ImageEncoder:
             webp-encoded bytearray of the provided input data
         """
         with BytesIO() as f:
-          if data.ndim == 3:
-            im = Image.fromarray(np.moveaxis(data, 0, 3))
-          elif data.ndim == 4:
-            im = Image.fromarray(np.moveaxis(data, 0, 3), mode = 'RGBA')
-          else:
-            raise ValueError("unexpected number of image dimensions")
+            if data.ndim == 3:
+                im = Image.fromarray(np.moveaxis(data, 0, 3))
+            elif data.ndim == 4:
+                im = Image.fromarray(np.moveaxis(data, 0, 3), mode='RGBA')
+            else:
+                raise ValueError("unexpected number of image dimensions")
 
-          im.save(f, format="webp", lossless=True)
-
-          return f.getvalue()
-
+            im.save(f, format="webp", lossless=True)
+            return f.getvalue()
 
     @staticmethod
     def encode_as_png(data, profile, dst_transform):
@@ -176,7 +206,7 @@ class ImageEncoder:
             (3 or 4 x height x width) uint8 RGB array
         profile: dictionary
             dictionary of kwargs for png writing
-        affine: Affine
+        dst_transform: Affine
             affine transform for output tile
 
         Returns
@@ -184,16 +214,16 @@ class ImageEncoder:
         contents: bytearray
             png-encoded bytearray of the provided input data
         """
+        profile = profile.copy()  # Create copy to avoid modifying input
         profile["affine"] = dst_transform
         with rasterio.open("/vsimem/tileimg", "w", **profile) as dst:
             if data.ndim == 3:
                 dst.write(data)
             elif data.ndim == 4:
-                dst.write(np.moveaxis(data, 0, -1)) #Correct dimensions and preserve alpha
+                dst.write(np.moveaxis(data, 0, -1))
             else:
                 raise ValueError(f"Unexpected number of dimensions {data.ndim}")
         contents = bytearray(virtual_file_to_buffer("/vsimem/tileimg"))
-
         return contents
 
     @staticmethod
@@ -220,7 +250,7 @@ class ImageEncoder:
             if rgb_data.ndim == 3:
                 image = Image.fromarray(np.moveaxis(rgb_data, 0, -1), 'RGB')
             elif rgb_data.ndim == 4:
-                image = Image.fromarray(np.moveaxis(rgb_data, 0, -1), 'RGBA') # Add RGBA mode for 4 channel images
+                image = Image.fromarray(np.moveaxis(rgb_data, 0, -1), 'RGBA')
             else:
                 tile_size = default_tile_size
                 image = Image.fromarray(np.moveaxis(np.zeros((3,tile_size,tile_size),dtype=np.uint8), 0, -1), 'RGB')
