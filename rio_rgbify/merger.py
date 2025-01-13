@@ -156,6 +156,9 @@ class TerrainRGBMerger:
 
                 elevation = ImageEncoder._decode(rgb, source.base_val, source.interval, encoding.value) # Use the static decode method from the encoder
                 elevation = ImageEncoder._mask_elevation(elevation, source.mask_values)
+
+                #Apply height adjustment
+                elevation += source.height_adjustment
                 
                 bounds = mercantile.bounds(tile)
                 meta = dataset.meta.copy()
@@ -195,6 +198,7 @@ class TerrainRGBMerger:
         Optional[TileData]
             TileData object or None if it cannot be extracted.
         """
+        #print(f"_extract_tile called with source: {source}, zoom: {zoom}, x: {x}, y: {y}")
         current_zoom = zoom
         current_x, current_y = x, y
 
@@ -209,25 +213,21 @@ class TerrainRGBMerger:
                 
                 if result is not None:
                     try:
-                        data_meta = self._decode_tile(
-                            result[0],
-                            mercantile.Tile(current_x, current_y, current_zoom),
-                            source.encoding,
-                            source
-                        )
-                        if data_meta[0] is None or data_meta[0].size == 0:
+                        data_meta = self._decode_tile(result[0], mercantile.Tile(current_x, current_y, current_zoom), source.encoding, source) #pass in source
+                        #self.logger.debug(f"decoded data for {current_zoom}/{current_x}/{current_y}: data is {data_meta[0] is None}, meta is {data_meta[1] is None}")
+                        if data_meta[0] is None:
                             return None
-                        # Apply height adjustment here, before resampling
-                        data_meta[0] += source.height_adjustment
+                        if data_meta[0].size == 0:
+                          return None
                         return TileData(data_meta[0], data_meta[1], current_zoom)
                     except Exception as e:
-                        self.logger.error(f"Failed to decode tile {current_zoom}/{current_x}/{current_y}: {str(e)}")
+                        self.logger.error(f"Failed to decode tile {current_zoom}/{current_x}/{current_y}: {e}")
                         return None
-                
-                if current_zoom > 0:
-                    current_x //= 2
-                    current_y //= 2
-                current_zoom -= 1
+            
+            if current_zoom > 0:
+                current_x //= 2
+                current_y //= 2
+            current_zoom -= 1
         
         return None
 
