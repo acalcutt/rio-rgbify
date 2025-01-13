@@ -44,7 +44,6 @@ class ProcessTileArgs:
     resampling: int
     output_image_format: ImageFormat
     output_quantized_alpha: bool
-    write_queue: Queue # Add the write queue to the ProcessTileArgs
 
 @dataclass
 class TileData:
@@ -417,7 +416,7 @@ class TerrainRGBMerger:
                 max_zoom = args.tile.z,
                 bounds = None
             )
-            merger.process_tile(args.tile, args.write_queue) # Pass in the shared queue
+            merger.process_tile(args.tile, merger.write_queue) # Pass in the shared queue from the main process
         except Exception as e:
             logging.error(f"Error processing tile {args.tile}: {e}")
     
@@ -457,7 +456,6 @@ class TerrainRGBMerger:
                 resampling=self.resampling,
                 output_image_format = self.output_image_format,
                 output_quantized_alpha=self.output_quantized_alpha,
-                write_queue = self.write_queue
             )
             for tile in tiles
         ]
