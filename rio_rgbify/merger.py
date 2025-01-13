@@ -123,6 +123,8 @@ class TerrainRGBMerger:
             image_png = io.BytesIO()
             image.save(image_png, format='PNG', bits=8)
             image_png.seek(0)
+
+            self.logger.error(f"image {image}")
             
             with rasterio.open(image_png) as dataset:
                 # Check if we can read data properly
@@ -133,9 +135,9 @@ class TerrainRGBMerger:
                     return None, {}
 
                 elevation = ImageEncoder._decode(rgb, source.base_val, source.interval, encoding.value)
-                console.log(elevation)
+                self.logger.error(f"1 {elevation}")
                 elevation = ImageEncoder._mask_elevation(elevation, source.mask_values)
-                console.log(elevation)
+                self.logger.error(f"2 {elevation}")
                 
                 bounds = mercantile.bounds(tile)
                 meta = dataset.meta.copy()
