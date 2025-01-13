@@ -9,7 +9,7 @@ import multiprocessing
 from pathlib import Path
 import logging
 from enum import Enum
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from typing import Optional, Tuple, List
 from contextlib import contextmanager
 from rio_rgbify.database import MBTilesDatabase
