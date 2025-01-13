@@ -45,9 +45,11 @@ class TileData:
     source_zoom: int
 
 
-def process_tile_task(task_tuple: tuple) -> None:
+def process_tile_task(task_and_queue: Tuple[tuple, Queue]) -> None:
     """Standalone function for processing tiles that can be pickled"""
-    tile, sources, output_path, output_encoding, resampling, output_image_format, output_quantized_alpha, source_encodings, height_adjustments, base_vals, intervals, mask_values = task_tuple
+    (tile, sources, output_path, output_encoding, resampling, output_image_format, output_quantized_alpha,
+        source_encodings, height_adjustments, base_vals, intervals, mask_values), write_queue = task_and_queue
+
     try:
         # Reconstruct MBTilesSource objects
         sources = [
@@ -90,7 +92,7 @@ def process_tile_task(task_tuple: tuple) -> None:
             for source in sources
         }
         
-        merger.process_tile(tile, source_conns, merger.write_queue)
+        merger.process_tile(tile, source_conns, write_queue)
         
         # Clean up connections
         for conn in source_conns.values():
@@ -429,9 +431,9 @@ class TerrainRGBMerger:
         tiles = set()
         
         if self.bounds is not None:
-          w,s,e,n = self.bounds
-          for x, y in _tile_range(mercantile.tile(w, n, zoom), mercantile.tile(e, s, zoom)):
-            tiles.add(mercantile.Tile(x=x, y=y, z=zoom))
+            w,s,e,n = self.bounds
+            for x, y in _tile_range(mercantile.tile(w, n, zoom), mercantile.tile(e, s, zoom)):
+                tiles.add(mercantile.Tile(x=x, y=y, z=zoom))
         else:
             # Get tiles from the LAST source
             source = self.sources[-1]
