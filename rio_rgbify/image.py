@@ -75,7 +75,6 @@ class ImageEncoder:
             rgb[0] = data // 256
             rgb[1] = np.floor(data % 256)
             rgb[2] = np.floor((data - np.floor(data)) * 256)
-            print(f"rgb terrarium: {rgb}")
             return rgb
         else:
             rgb = np.zeros((3, rows, cols), dtype=np.uint8)
@@ -87,7 +86,6 @@ class ImageEncoder:
                 rgb[0] = np.floor((data / (256 * 256)) % 256).astype(np.uint8)
                 rgb[1] = np.floor((data / 256) % 256).astype(np.uint8)
                 rgb[2] = np.floor(data % 256).astype(np.uint8)
-                print(f"rgb mapbox: {rgb}")
             return rgb
     
     @staticmethod
@@ -253,18 +251,24 @@ class ImageEncoder:
         print(f"save_rgb_to_bytes called with rgb data shape {rgb_data.shape}")
         image_bytes = BytesIO()
         if rgb_data.size > 0:
-            if rgb_data.ndim == 3:
-                image = Image.fromarray(np.moveaxis(rgb_data, 0, -1), 'RGB')
-            elif rgb_data.ndim == 4:
-                image = Image.fromarray(np.moveaxis(rgb_data, 0, -1), 'RGBA')
-            else:
-                tile_size = default_tile_size
-                image = Image.fromarray(np.moveaxis(np.zeros((3,tile_size,tile_size),dtype=np.uint8), 0, -1), 'RGB')
-            
-            if output_image_format == ImageFormat.PNG:
-                image.save(image_bytes, format='PNG')
-            elif output_image_format == ImageFormat.WEBP:
-                image.save(image_bytes, format='WEBP', lossless=True)
-            image_bytes = image_bytes.getvalue()
+            try:
+                if rgb_data.ndim == 3:
+                    image = Image.fromarray(np.moveaxis(rgb_data, 0, -1).astype(np.uint8), 'RGB')
+                elif rgb_data.ndim == 4:
+                    image = Image.fromarray(np.moveaxis(rgb_data, 0, -1).astype(np.uint8), 'RGBA')
+                else:
+                  tile_size = default_tile_size
+                  image = Image.fromarray(np.moveaxis(np.zeros((3,tile_size,tile_size),dtype=np.uint8), 0, -1), 'RGB')
+
+                print(f"image created with shape: {np.array(image).shape}")
+
+                if output_image_format == ImageFormat.PNG:
+                    image.save(image_bytes, format='PNG')
+                elif output_image_format == ImageFormat.WEBP:
+                    image.save(image_bytes, format='WEBP', lossless=True)
+                image_bytes = image_bytes.getvalue()
+                print(f"image_bytes size {len(image_bytes)}")
+            except Exception as e:
+                logging.error(f"Failed to encode image: {e}")
 
         return image_bytes
