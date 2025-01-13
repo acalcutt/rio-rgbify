@@ -443,7 +443,7 @@ class TerrainRGBMerger:
         # Process tiles in parallel using the standalone function
         with multiprocessing.Pool(self.processes) as pool:
             for _ in pool.imap_unordered(
-                _process_tile_task_with_instance,
+                process_tile_task,
                 tasks,
                 chunksize=1
             ):
@@ -566,6 +566,3 @@ def _tile_range(start: mercantile.Tile, stop: mercantile.Tile):
     for x in range(start.x, stop.x + 1):
         for y in range(start.y, stop.y + 1):
             yield x, y
-
-def _process_tile_task_with_instance(task):
-    return process_tile_task(task)
