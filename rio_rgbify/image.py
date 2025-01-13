@@ -249,6 +249,7 @@ class ImageEncoder:
             bytes for a image encoded to the given output format
         """
         print(f"save_rgb_to_bytes called with rgb data shape {rgb_data.shape}")
+        print(f"rgbdata {rgb_data}")
         image_bytes = BytesIO()
         if rgb_data.size > 0:
             try:
