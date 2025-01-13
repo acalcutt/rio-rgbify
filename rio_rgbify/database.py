@@ -1,7 +1,7 @@
 import sqlite3
 import os
 import math
-from typing import List
+from typing import List, Optional
 from contextlib import contextmanager
 from pathlib import Path
 
@@ -64,10 +64,10 @@ class MBTilesDatabase:
     def add_metadata(self, metadata: dict):
         """Adds metadata to the mbtiles db"""
         for key, value in metadata.items():
-          self.cur.execute(
-            "INSERT INTO metadata " "(name, value) " "VALUES (?, ?);",
-            (key, value),
-          )
+            self.cur.execute(
+                "INSERT INTO metadata " "(name, value) " "VALUES (?, ?);",
+                (key, value),
+            )
         self.conn.commit()
 
     def fnv1a(self, buf: bytes) -> int:
@@ -80,38 +80,70 @@ class MBTilesDatabase:
 
         return h
 
-    def insert_tile(tile: List[int], contents: bytes):
-      """Add tile to database with deduplication logic"""
-      x, y, z = tile
-      # mbtiles use inverse y indexing
-      tiley = int(math.pow(2, z)) - y - 1
-      
-      #create tile_id based on tile contents
-      data = buffer(contents)
-      tileDataId = str(self.fnv1a(data))
-      
-      # insert tile object
-      self.cur.execute(
-        "INSERT OR IGNORE INTO tiles_data "
-        "(tile_data_id, tile_data) "
-        "VALUES (?, ?);",
-        (tileDataId, data),
-      )
+    def insert_tile(self, tile: List[int], contents: bytes):
+        """Add tile to database with deduplication logic"""
+        x, y, z = tile
+        # mbtiles use inverse y indexing
+        tiley = int(math.pow(2, z)) - y - 1
+        
+        #create tile_id based on tile contents
+        tileDataId = str(self.fnv1a(contents))
+        
+        # insert tile object
+        self.cur.execute(
+            "INSERT OR IGNORE INTO tiles_data "
+            "(tile_data_id, tile_data) "
+            "VALUES (?, ?);",
+            (tileDataId, contents),
+        )
 
-      self.cur.execute(
-        "INSERT INTO tiles_shallow "
-        "(TILES_COL_Z, TILES_COL_X, TILES_COL_Y, TILES_COL_DATA_ID) "
-        "VALUES (?, ?, ?, ?);",
-        (z, x, tiley, tileDataId),
-      )
+        self.cur.execute(
+            "INSERT INTO tiles_shallow "
+            "(TILES_COL_Z, TILES_COL_X, TILES_COL_Y, TILES_COL_DATA_ID) "
+            "VALUES (?, ?, ?, ?);",
+            (z, x, tiley, tileDataId),
+        )
 
-    @staticmethod
     @contextmanager
-    def _db_connection(db_path: Path):
+    def db_connection(self):
         """Context manager for database connections"""
-        print(f"_db_connection called with db_path: {db_path}")
-        conn = sqlite3.connect(db_path)
+        print(f"db_connection called with outpath: {self.outpath}")
+        conn = sqlite3.connect(self.outpath)
         try:
             yield conn
         finally:
             conn.close()
+
+    def get_tile_data(self, zoom: int, x: int, y: int) -> Optional[bytes]:
+        """Retrieves tile data from the database based on zoom, x, y"""
+        with self.db_connection() as conn:
+            cursor = conn.cursor()
+            cursor.execute(
+                "SELECT tile_data FROM tiles WHERE zoom_level=? AND tile_column=? AND tile_row=?",
+                (zoom, x, y)
+            )
+            result = cursor.fetchone()
+            if result:
+                return result[0]
+            return None
+        
+    def get_max_zoom_level(self) -> int:
+        """Get the maximum zoom level from the tiles table."""
+        with self.db_connection() as conn:
+            cursor = conn.cursor()
+            cursor.execute("SELECT MAX(zoom_level) FROM tiles")
+            result = cursor.fetchone()
+            if result and result[0] is not None:
+                return result[0]
+            return 0
+    
+    def get_distinct_tiles(self, zoom: int) -> List[tuple[int, int]]:
+        """Get the distinct tile_column and tile_row for a given zoom level."""
+        with self.db_connection() as conn:
+            cursor = conn.cursor()
+            cursor.execute(
+                'SELECT DISTINCT tile_column, tile_row FROM tiles WHERE zoom_level = ?',
+                (zoom,)
+            )
+            rows = cursor.fetchall()
+            return rows
