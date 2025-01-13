@@ -204,7 +204,10 @@ def merge(config, workers, verbose):
     output_path = Path(config_data.get("output_path", "output.mbtiles"))
     output_encoding = EncodingType(config_data.get("output_encoding", "mapbox"))
     output_format = ImageFormat(config_data.get("output_format", "png"))
-    resampling = Resampling(config_data.get("resampling","bilinear"))
+    resampling_str = config_data.get("resampling","bilinear")
+    if resampling_str not in ["nearest", "bilinear", "cubic", "cubic_spline", "lanczos", "average", "mode", "gauss"]:
+      raise ValueError(f" is not a supported resampling method! {resampling_str}")
+    resampling = Resampling(resampling_str)
     output_quantized_alpha = config_data.get("output_quantized_alpha", False)
     min_zoom = config_data.get("min_zoom", 0)
     max_zoom = config_data.get("max_zoom", None)
@@ -219,6 +222,7 @@ def merge(config, workers, verbose):
             raise TypeError(
                 "Bounding box of  is not valid, must be a comma seperated list of 4 floats in the order west, south, east, north".format(bounds)
             )
+
 
     merger = TerrainRGBMerger(
         sources = sources,
