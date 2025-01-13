@@ -462,7 +462,7 @@ class TerrainRGBMerger:
                 conn.close()
 
 
-    def _get_tiles_for_zoom(self, zoom: int) -> List[mercantile.Tile]:
+    def _get_tiles_for_zoom(self, zoom: int, source_conns: Dict[Path, sqlite3.Connection]) -> List[mercantile.Tile]:
         """Get list of tiles to process for a given zoom level"""
         tiles = set()
         
@@ -471,24 +471,26 @@ class TerrainRGBMerger:
             for x, y in _tile_range(mercantile.tile(w, n, zoom), mercantile.tile(e, s, zoom)):
                 tiles.add(mercantile.Tile(x=x, y=y, z=zoom))
         else:
-            # Create a new connection for this function
-            with sqlite3.connect(self.sources[-1].path) as conn:
-                cursor = conn.cursor()
-                cursor.execute(
-                    'SELECT DISTINCT tile_column, tile_row FROM tiles WHERE zoom_level = ?',
-                    (zoom,)
-                )
-                rows = cursor.fetchall()
-                
-                if not rows:
-                    self.logger.warning(f"No tiles found for zoom level {zoom} in source {self.sources[-1].path}")
-                else:
-                    for row in rows:
-                        if isinstance(row, tuple) and len(row) == 2:
-                            x, y = row
-                            tiles.add(mercantile.Tile(x=x, y=y, z=zoom))
-                        else:
-                            self.logger.warning(f"Skipping invalid row: {row}")
+            # Get tiles from the LAST source
+            source = self.sources[-1]
+            conn = source_conns[source.path]
+            cursor = conn.cursor()
+            cursor.execute(
+                'SELECT DISTINCT tile_column, tile_row FROM tiles WHERE zoom_level = ?',
+                (zoom,)
+            )
+            rows = cursor.fetchall()
+            
+            if not rows:
+                self.logger.warning(f"No tiles found for zoom level {zoom} in source {self.sources[-1].path}")
+            else:
+                #self.logger.debug(f"Rows fetched for zoom level {zoom}: {rows}")
+                for row in rows:
+                    if isinstance(row, tuple) and len(row) == 2:
+                        x, y = row
+                        tiles.add(mercantile.Tile(x=x, y=y, z=zoom))
+                    else:
+                        self.logger.warning(f"Skipping invalid row: {row}")
         
         return list(tiles)
 
