@@ -237,7 +237,6 @@ def merge(config, workers, verbose):
         min_zoom = min_zoom,
         max_zoom = max_zoom,
         bounds = bounds,
-        source_conns = source_connections
     )
     
     try:
