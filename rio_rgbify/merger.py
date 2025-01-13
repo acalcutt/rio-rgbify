@@ -44,75 +44,27 @@ class TileData:
     meta: dict
     source_zoom: int
 
-
-def process_tile_task(task_tuple: tuple) -> None:
-    """Standalone function for processing tiles that can be pickled"""
-    tile, sources, output_path, output_encoding, resampling, output_image_format, output_quantized_alpha, source_encodings, height_adjustments, base_vals, intervals, mask_values, merger_queue = task_tuple
-    try:
-        # Reconstruct MBTilesSource objects
-        source_conns = {}
-        sources_objs = [
-            MBTilesSource(
-                path=path,
-                encoding=EncodingType(encoding),
-                height_adjustment=height_adj,
-                base_val=base_val,
-                interval=interval,
-                mask_values=mask_vals
-            )
-            for path, encoding, height_adj, base_val, interval, mask_vals in zip(
-                sources,
-                source_encodings,
-                height_adjustments,
-                base_vals,
-                intervals,
-                mask_values
-            )
-        ]
-        for source in sources_objs:
-            source_conns[source.path] = sqlite3.connect(source.path)
-        # Create merger instance
-        merger = TerrainRGBMerger(
-            sources=sources_objs,
-            output_path=output_path,
-            output_encoding=EncodingType(output_encoding),
-            resampling=resampling,
-            processes=1,
-            default_tile_size=512,
-            output_image_format=ImageFormat(output_image_format),
-            output_quantized_alpha=output_quantized_alpha,
-            min_zoom=tile.z,
-            max_zoom=tile.z,
-            bounds=None,
-        )
-        
-        # Process the tile
-        merger.process_tile(tile, source_conns, merger.write_queue)
-        for conn in source_conns.values():
-            conn.close()
-        
-    except Exception as e:
-        logging.error(f"Error processing tile {tile}: {e}")
-        raise
-
 class TerrainRGBMerger:
     """
     A class to merge multiple Terrain RGB MBTiles files.
     """
-    def __init__(
-        self,
-        sources: List[MBTilesSource],
-        output_path: Path,
-        output_encoding: EncodingType = EncodingType.MAPBOX,
-        resampling: int = Resampling.lanczos,
-        processes: Optional[int] = None,
-        default_tile_size: int = 512,
-        output_image_format: ImageFormat = ImageFormat.PNG,
-        output_quantized_alpha: bool = False,
-        min_zoom: int = 0,
-        max_zoom: Optional[int] = None,
-        bounds: Optional[List[float]] = None,
-    ):
+    def __init__(self, sources, output_path, output_encoding=EncodingType.MAPBOX,
+                 resampling=Resampling.lanczos, processes=None, default_tile_size=512,
+                 output_image_format=ImageFormat.PNG, output_quantized_alpha=False,
+                 min_zoom=0, max_zoom=None, bounds=None):
+        self.sources = sources
+        self.output_path = Path(output_path)
+        self.output_encoding = output_encoding
+        self.resampling = resampling
+        self.processes = processes or multiprocessing.cpu_count()
+        self.logger = logging.getLogger(__name__)
+        self.default_tile_size = default_tile_size
+        self.output_image_format = output_image_format
+        self.output_quantized_alpha = output_quantized_alpha
+        self.min_zoom = min_zoom
+        self.max_zoom = max_zoom
+        self.bounds = bounds
+        self.write_queue = Queue()
         """
         Initializes the TerrainRGBMerger.
 
@@ -463,42 +415,26 @@ class TerrainRGBMerger:
                 db.insert_tile([tile.x, tile.y, tile.z], image_bytes)
                 write_queue.task_done()
 
-    def process_zoom_level(self, zoom: int, source_conns: Dict[Path, sqlite3.Connection]):
+    def process_zoom_level(self, zoom: int):
         """Process all tiles for a given zoom level in parallel"""
-        print(f"process_zoom_level called with zoom: {zoom}")
         self.logger.info(f"Processing zoom level {zoom}")
         
         # Get list of tiles to process
-        tiles = self._get_tiles_for_zoom(zoom, source_conns)
+        tiles = self._get_tiles_for_zoom(zoom)
         self.logger.info(f"Found {len(tiles)} tiles to process")
         
-        # Create task tuples
-        tasks = [
-          (
-            tile,
-            [source.path for source in self.sources],
-            self.output_path,
-            self.output_encoding.value,
-            self.resampling,
-            self.output_image_format.value,
-            self.output_quantized_alpha,
-            [source.encoding.value for source in self.sources],
-            [source.height_adjustment for source in self.sources],
-            [source.base_val for source in self.sources],
-            [source.interval for source in self.sources],
-            [source.mask_values for source in self.sources],
-            self.write_queue
-          )
-          for tile in tiles
-        ]
+        # Create simplified task tuples with just the essential data
+        tasks = [(tile, [(s.path, s.encoding.value, s.height_adjustment, s.base_val, 
+                         s.interval, s.mask_values) for s in self.sources]) 
+                for tile in tiles]
 
         # Create the writer process
         writer_process = multiprocessing.Process(target=self._writer_process, args=(self.write_queue,))
         writer_process.start()
         
-        # Process tiles in parallel using starmap, also passing the queue to each worker
+        # Process tiles in parallel
         with multiprocessing.Pool(self.processes) as pool:
-            for _ in pool.imap_unordered(process_tile_task, tasks, chunksize=1):
+            for _ in pool.imap_unordered(self.process_tile_task, tasks, chunksize=1):
                 pass
 
         # Clean up
@@ -506,38 +442,69 @@ class TerrainRGBMerger:
         self.write_queue.join()
         writer_process.join()
 
-    def get_max_zoom_level(self, source_conns:  Dict[Path, sqlite3.Connection]) -> int:
-        """Get the maximum zoom level from the last source
+    def _get_tiles_for_zoom(self, zoom: int) -> List[mercantile.Tile]:
+        """Get list of tiles to process for a given zoom level"""
+        tiles = set()
         
-        Returns
-        -------
-        int
-            The maximum zoom level found in the last source.
-        """
-        print("_get_max_zoom_level called")
-        source = self.sources[-1]
-        conn = source_conns[source.path]
-        cursor = conn.cursor()
-        cursor.execute("SELECT MAX(zoom_level) FROM tiles")
-        result = cursor.fetchone()
-        max_zoom = result[0] if result and result[0] is not None else 0
-        return max_zoom
+        if self.bounds is not None:
+            w, s, e, n = self.bounds
+            for x, y in _tile_range(mercantile.tile(w, n, zoom), mercantile.tile(e, s, zoom)):
+                tiles.add(mercantile.Tile(x=x, y=y, z=zoom))
+        else:
+            # Create a new connection for this function
+            with sqlite3.connect(self.sources[-1].path) as conn:
+                cursor = conn.cursor()
+                cursor.execute(
+                    'SELECT DISTINCT tile_column, tile_row FROM tiles WHERE zoom_level = ?',
+                    (zoom,)
+                )
+                rows = cursor.fetchall()
+                
+                if not rows:
+                    self.logger.warning(f"No tiles found for zoom level {zoom} in source {self.sources[-1].path}")
+                else:
+                    for row in rows:
+                        if isinstance(row, tuple) and len(row) == 2:
+                            x, y = row
+                            tiles.add(mercantile.Tile(x=x, y=y, z=zoom))
+                        else:
+                            self.logger.warning(f"Skipping invalid row: {row}")
+        
+        return list(tiles)
 
-    def process_all(self, min_zoom: int = 0, source_conns:  Dict[Path, sqlite3.Connection] = None):
-        """Process all zoom levels from min_zoom to max available
+    def process_tile_task(self, task_tuple: tuple) -> None:
+        """Process a single tile task"""
+        tile, sources_info = task_tuple
         
-        Parameters
-        ----------
-        min_zoom : int, optional
-            The minimum zoom level to start processing at. Defaults to 0
-        """
-        print(f"process_all called with min_zoom: {min_zoom}")
-        max_zoom = self.max_zoom if self.max_zoom is not None else self.get_max_zoom_level(source_conns)
+        # Create new connections for each source within the worker process
+        source_conns = {}
+        try:
+            for source in self.sources:
+                source_conns[source.path] = sqlite3.connect(source.path)
+            
+            self.process_tile(tile, source_conns, self.write_queue)
+            
+        finally:
+            # Clean up connections
+            for conn in source_conns.values():
+                conn.close()
+
+    def get_max_zoom_level(self) -> int:
+        """Get the maximum zoom level from the last source"""
+        with sqlite3.connect(self.sources[-1].path) as conn:
+            cursor = conn.cursor()
+            cursor.execute("SELECT MAX(zoom_level) FROM tiles")
+            result = cursor.fetchone()
+            max_zoom = result[0] if result and result[0] is not None else 0
+            return max_zoom
+
+    def process_all(self, min_zoom: int = 0):
+        """Process all zoom levels"""
+        max_zoom = self.max_zoom if self.max_zoom is not None else self.get_max_zoom_level()
         self.logger.info(f"Processing zoom levels {min_zoom} to {max_zoom}")
 
         for zoom in range(min_zoom, max_zoom + 1):
-            self.process_zoom_level(zoom, source_conns)
-        
+            self.process_zoom_level(zoom)
 
         self.logger.info("Completed processing all zoom levels")
 

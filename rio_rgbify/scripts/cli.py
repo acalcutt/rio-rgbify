@@ -240,7 +240,7 @@ def merge(config, workers, verbose):
     )
     
     try:
-      merger.process_all(min_zoom=min_zoom if min_zoom is not None else 0, source_conns = source_connections)
+      merger.process_all(min_zoom=min_zoom if min_zoom is not None else 0)
     finally:
       for conn in source_connections.values():
         conn.close()
