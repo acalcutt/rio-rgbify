@@ -354,7 +354,7 @@ class TerrainRGBMerger:
                 rgb_data = ImageEncoder.data_to_rgb(merged_elevation, self.output_encoding, 0.1, base_val=-10000, quantized_alpha=self.output_quantized_alpha if self.output_encoding == EncodingType.TERRARIUM else False) # Use the encoder from the encoders.py file
                 image_bytes = ImageEncoder.save_rgb_to_bytes(rgb_data, self.output_image_format, self.default_tile_size)
                 
-                self.write_queue.put((tile, image_bytes)) # Write to the queue
+                self.write_queue.put((tile, image_bytes))
                 self.logger.info(f"Successfully processed tile {tile.z}/{tile.x}/{tile.y}")
         except Exception as e:
             self.logger.error(f"Error processing tile {tile.z}/{tile.x}/{tile.y}: {e}")
@@ -400,7 +400,7 @@ class TerrainRGBMerger:
         return list(tiles)
 
     @staticmethod
-    def _process_tile_wrapper(args: ProcessTileArgs, write_queue: Queue) -> None:
+    def _process_tile_wrapper(args: ProcessTileArgs) -> None:
         """Static wrapper method for parallel tile processing
         
         Parameters
@@ -479,7 +479,7 @@ class TerrainRGBMerger:
 
         # Process tiles in parallel
         with multiprocessing.Pool(self.processes) as pool:
-            for _ in pool.imap_unordered(self._process_tile_wrapper, process_args, ):
+            for _ in pool.imap_unordered(self._process_tile_wrapper, process_args):
                 pass
         
         # Put the None value to stop the writer and wait for queue to empty
