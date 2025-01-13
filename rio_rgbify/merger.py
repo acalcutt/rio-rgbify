@@ -44,63 +44,6 @@ class TileData:
     meta: dict
     source_zoom: int
 
-def process_tile_task(merger_instance: TerrainRGBMerger, task_tuple: tuple) -> None:
-    """Standalone function for processing tiles that can be pickled"""
-    tile, source_configs, output_path, output_encoding, resampling, output_format, output_alpha = task_tuple
-    
-    try:
-        # Create connections for each source
-        source_conns = {}
-        sources = []
-        
-        # Reconstruct MBTilesSource objects and create connections
-        for path, encoding, height_adj, base_val, interval, mask_vals in source_configs:
-            source = MBTilesSource(
-                path=Path(path),
-                encoding=EncodingType(encoding),
-                height_adjustment=height_adj,
-                base_val=base_val,
-                interval=interval,
-                mask_values=mask_vals
-            )
-            sources.append(source)
-            source_conns[source.path] = sqlite3.connect(source.path)
-
-        # Extract tiles from all sources
-        tile_datas = []
-        for source in sources:
-            tile_data = merger_instance._extract_tile(source, tile.z, tile.x, tile.y, source_conns)
-            tile_datas.append(tile_data)
-
-        if not any(tile_datas):
-            return
-
-        # Merge the elevation data
-        merged_elevation = merger_instance._merge_tiles(tile_datas, tile)
-        
-        if merged_elevation is not None:
-            # Encode using output format
-            rgb_data = ImageEncoder.data_to_rgb(
-                merged_elevation,
-                output_encoding,
-                0.1,
-                base_val=-10000,
-                quantized_alpha=output_alpha
-            )
-            image_bytes = ImageEncoder.save_rgb_to_bytes(rgb_data, output_format)
-            
-            # Write to output database
-            with sqlite3.connect(output_path) as conn:
-                db = MBTilesDatabase(output_path)
-                db.insert_tile([tile.x, tile.y, tile.z], image_bytes)
-
-    except Exception as e:
-        logging.error(f"Error processing tile {tile.z}/{tile.x}/{tile.y}: {e}")
-        raise
-    finally:
-        # Clean up connections
-        for conn in source_conns.values():
-            conn.close()
 
 class TerrainRGBMerger:
     """
@@ -549,6 +492,64 @@ class TerrainRGBMerger:
             self.process_zoom_level(zoom)
 
         self.logger.info("Completed processing all zoom levels")
+
+def process_tile_task(merger_instance: TerrainRGBMerger, task_tuple: tuple) -> None:
+    """Standalone function for processing tiles that can be pickled"""
+    tile, source_configs, output_path, output_encoding, resampling, output_format, output_alpha = task_tuple
+    
+    try:
+        # Create connections for each source
+        source_conns = {}
+        sources = []
+        
+        # Reconstruct MBTilesSource objects and create connections
+        for path, encoding, height_adj, base_val, interval, mask_vals in source_configs:
+            source = MBTilesSource(
+                path=Path(path),
+                encoding=EncodingType(encoding),
+                height_adjustment=height_adj,
+                base_val=base_val,
+                interval=interval,
+                mask_values=mask_vals
+            )
+            sources.append(source)
+            source_conns[source.path] = sqlite3.connect(source.path)
+
+        # Extract tiles from all sources
+        tile_datas = []
+        for source in sources:
+            tile_data = merger_instance._extract_tile(source, tile.z, tile.x, tile.y, source_conns)
+            tile_datas.append(tile_data)
+
+        if not any(tile_datas):
+            return
+
+        # Merge the elevation data
+        merged_elevation = merger_instance._merge_tiles(tile_datas, tile)
+        
+        if merged_elevation is not None:
+            # Encode using output format
+            rgb_data = ImageEncoder.data_to_rgb(
+                merged_elevation,
+                output_encoding,
+                0.1,
+                base_val=-10000,
+                quantized_alpha=output_alpha
+            )
+            image_bytes = ImageEncoder.save_rgb_to_bytes(rgb_data, output_format)
+            
+            # Write to output database
+            with sqlite3.connect(output_path) as conn:
+                db = MBTilesDatabase(output_path)
+                db.insert_tile([tile.x, tile.y, tile.z], image_bytes)
+
+    except Exception as e:
+        logging.error(f"Error processing tile {tile.z}/{tile.x}/{tile.y}: {e}")
+        raise
+    finally:
+        # Clean up connections
+        for conn in source_conns.values():
+            conn.close()
 
 def _tile_range(start: mercantile.Tile, stop: mercantile.Tile):
     for x in range(start.x, stop.x + 1):
