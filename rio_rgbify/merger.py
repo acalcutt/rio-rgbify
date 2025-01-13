@@ -142,6 +142,7 @@ class TerrainRGBMerger:
                 bounds = mercantile.bounds(tile)
                 meta = dataset.meta.copy()
                 
+                self.logger.error(f"3 {meta}")
                 meta.update({
                     'count': 1,
                     'dtype': rasterio.float32,
@@ -152,6 +153,7 @@ class TerrainRGBMerger:
                         meta['width'], meta['height']
                     )
                 })
+                self.logger.error(f"4 {meta}")
                 
                 return elevation, meta
         except Exception as e:
