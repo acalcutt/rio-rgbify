@@ -132,39 +132,39 @@ class TerrainRGBMerger:
             A tuple containing the decoded elevation data and metadata, or None, None if decoding fails.
         """
         if not isinstance(tile_data, bytes) or len(tile_data) == 0:
-            self.logger.debug(f"Invalid tile data for tile {tile.z}/{tile.x}/{tile.y}")
-            return None, {}
+            raise ValueError("Invalid tile data")
             
         try:
+            # Log the size of the tile data to make sure it's non-empty
+            #self.logger.debug(f"Tile data size for {tile.z}/{tile.x}/{tile.y}: {len(tile_data)} bytes")
+            
+            # Convert the image to a PNG using Pillow
             image = Image.open(io.BytesIO(tile_data))
-            image = image.convert('RGB')
+            image = image.convert('RGB')  # Force to RGB
             image_png = io.BytesIO()
             image.save(image_png, format='PNG', bits=8)
             image_png.seek(0)
             
             with rasterio.open(image_png) as dataset:
+                # Check if we can read data properly
                 rgb = dataset.read(masked=False).astype(np.int32)
+                #self.logger.debug(f"Decoded tile RGB shape: {rgb.shape}, dtype: {rgb.dtype}")
                 
                 if rgb.ndim != 3 or rgb.shape[0] != 3:
-                    self.logger.debug(f"Invalid RGB shape in tile {tile.z}/{tile.x}/{tile.y}: {rgb.shape}")
-                    return None, {}
-
-                # Check RGB bounds before decoding
-                if np.any(rgb < 0) or np.any(rgb > 255):
-                    self.logger.debug(f"RGB values out of bounds in tile {tile.z}/{tile.x}/{tile.y}")
+                    self.logger.error(f"Unexpected RGB shape in tile {tile.z}/{tile.x}/{tile.y}: {rgb.shape}")
                     return None, {}
 
                 if encoding == EncodingType.MAPBOX:
-                    elevation = ImageEncoder._decode(rgb, source.base_val, source.interval, encoding.value)
+                   elevation = ImageEncoder._decode(rgb, source.base_val, source.interval, encoding.value)
                 elif encoding == EncodingType.TERRARIUM:
-                    elevation = ImageEncoder._decode(rgb, 0, 1, encoding.value)
+                   elevation = ImageEncoder._decode(rgb, 0, 1, encoding.value)
                 else:
-                    raise ValueError(f"Invalid encoding type: {encoding}")
+                  raise ValueError(f"Invalid encoding type: {encoding}")
 
                 elevation = ImageEncoder._mask_elevation(elevation, source.mask_values)
                 
                 bounds = mercantile.bounds(tile)
-                meta = dataset.meta.copy()
+                meta = dict(dataset.meta.copy())
                 meta.update({
                     'count': 1,
                     'dtype': rasterio.float32,
@@ -176,9 +176,10 @@ class TerrainRGBMerger:
                     )
                 })
                 
+                #self.logger.debug(f"Decoded elevation: min={np.nanmin(elevation)}, max={np.nanmax(elevation)}")
                 return elevation, meta
         except Exception as e:
-            self.logger.error(f"Failed to decode tile {tile.z}/{tile.x}/{tile.y}: {str(e)}")
+            self.logger.error(f"Failed to decode tile data, returning None, None: {e}")
             return None, {}
 
     def _extract_tile(self, source: MBTilesSource, zoom: int, x: int, y: int) -> Optional[TileData]:
