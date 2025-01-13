@@ -14,6 +14,10 @@ from typing import Optional, Tuple, List
 from contextlib import contextmanager
 from rio_rgbify.database import MBTilesDatabase
 from rio_rgbify.image import ImageFormat, ImageEncoder
+import sys
+
+
+buffer = bytes if sys.version_info > (3,) else buff
 
 class EncodingType(Enum):
     MAPBOX = "mapbox"
