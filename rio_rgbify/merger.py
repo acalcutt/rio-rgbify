@@ -410,8 +410,17 @@ class TerrainRGBMerger:
                         return dst_data
 
     def process_tile(self, tile: mercantile.Tile, source_conns: Dict[Path, sqlite3.Connection], write_queue: Queue) -> None:
-        """Process a single tile, merging data from multiple sources"""
-        #print(f"process_tile called with tile: {tile}")
+        """Process a single tile
+        
+        Parameters
+        ----------
+        tile : mercantile.Tile
+            The tile to process
+        source_conns : Dict[Path, sqlite3.Connection]
+            Dictionary of database connections for each source
+        write_queue : Queue
+            Queue for writing processed tiles
+        """
         try:
             # Extract tiles from all sources
             tile_datas = [self._extract_tile(source, tile.z, tile.x, tile.y, source_conns) for source in self.sources]
@@ -425,15 +434,21 @@ class TerrainRGBMerger:
             
             if merged_elevation is not None:
                 # Encode using output format and save
-                rgb_data = ImageEncoder.data_to_rgb(merged_elevation, self.output_encoding, 0.1, base_val=-10000, quantized_alpha=self.output_quantized_alpha if self.output_encoding == EncodingType.TERRARIUM else False) # Use the encoder from the encoders.py file
+                rgb_data = ImageEncoder.data_to_rgb(
+                    merged_elevation, 
+                    self.output_encoding, 
+                    0.1, 
+                    base_val=-10000, 
+                    quantized_alpha=self.output_quantized_alpha if self.output_encoding == EncodingType.TERRARIUM else False
+                )
                 image_bytes = ImageEncoder.save_rgb_to_bytes(rgb_data, self.output_image_format, self.default_tile_size)
                 
-                write_queue.put((tile, image_bytes)) # Write to the queue
+                write_queue.put((tile, image_bytes))
                 self.logger.info(f"Successfully processed tile {tile.z}/{tile.x}/{tile.y}")
         except Exception as e:
             self.logger.error(f"Error processing tile {tile.z}/{tile.x}/{tile.y}: {e}")
             raise
-        
+
     def _get_tiles_for_zoom(self, zoom: int) -> List[mercantile.Tile]:
         """Get list of tiles to process for a given zoom level
         
@@ -506,6 +521,26 @@ class TerrainRGBMerger:
         except Exception as e:
             logging.error(f"Error processing tile {args.tile}: {e}")
 
+    def process_tile_multiprocess(self, task_tuple: tuple) -> None:
+        """Process a single tile for multiprocessing
+        
+        Parameters
+        ----------
+        task_tuple : tuple
+            Tuple containing (tile, sources, write_queue)
+        """
+        tile, sources, write_queue = task_tuple
+        try:
+            source_conns = {}
+            for source in sources:
+                source_conns[source.path] = sqlite3.connect(source.path)
+            self.process_tile(tile, source_conns, write_queue)
+            for conn in source_conns.values():
+                conn.close()
+        except Exception as e:
+            self.logger.error(f"Error processing tile {tile}: {e}")
+            raise
+
     def process_zoom_level(self, zoom: int):
         """Process all tiles for a given zoom level in parallel"""
         print(f"process_zoom_level called with zoom: {zoom}")
@@ -515,41 +550,22 @@ class TerrainRGBMerger:
         tiles = self._get_tiles_for_zoom(zoom)
         self.logger.info(f"Found {len(tiles)} tiles to process")
         
-        # Create processing tasks with all necessary data
-        processing_tasks = [
-            TileProcessingTask(
-                tile=tile,
-                sources=[source.path for source in self.sources],
-                output_path=self.output_path,
-                output_encoding=self.output_encoding.value,
-                resampling=self.resampling,
-                output_image_format=self.output_image_format.value,
-                output_quantized_alpha=self.output_quantized_alpha,
-                source_encodings=[source.encoding.value for source in self.sources],
-                height_adjustments=[source.height_adjustment for source in self.sources],
-                base_vals=[source.base_val for source in self.sources],
-                intervals=[source.interval for source in self.sources],
-                mask_values=[source.mask_values for source in self.sources]
-            )
-            for tile in tiles
-        ]
-        
-        # Pair tasks with queue
-        tasks_with_queue = [(task, self.write_queue) for task in processing_tasks]
+        # Create task tuples for starmap
+        tasks = [(tile, self.sources, self.write_queue) for tile in tiles]
         
         # Create writer process
-        writer_process = Process(target=self._writer_process, args=(self.write_queue,))
+        writer_process = multiprocessing.Process(target=self._writer_process, args=(self.write_queue,))
         writer_process.start()
         
-        # Process tiles in parallel
-        with Pool(self.processes) as pool:
-            for _ in pool.imap_unordered(process_tile_task, tasks_with_queue, chunksize=1):
-                pass
-                
+        # Process tiles in parallel using starmap
+        with multiprocessing.Pool(self.processes) as pool:
+            pool.starmap(self.process_tile_multiprocess, tasks)
+        
         # Clean up
         self.write_queue.put(None)
         self.write_queue.join()
         writer_process.join()
+
 
     def _writer_process(self, write_queue: Queue):
         """Writes to the db using a shared queue"""
@@ -559,8 +575,9 @@ class TerrainRGBMerger:
                 if item is None:
                     break
                 tile, image_bytes = item
-                db.insert_tile(tile = [tile.x, tile.y, tile.z], contents = image_bytes)
+                db.insert_tile([tile.x, tile.y, tile.z], image_bytes)
                 write_queue.task_done()
+
 
     def process_zoom_level(self, zoom: int):
         """Process all tiles for a given zoom level in parallel
