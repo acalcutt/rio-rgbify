@@ -17,6 +17,7 @@ from contextlib import contextmanager
 from rio_rgbify.database import MBTilesDatabase
 from rio_rgbify.image import ImageFormat, ImageEncoder
 from queue import Queue
+import functools
 
 class EncodingType(Enum):
     MAPBOX = "mapbox"
@@ -441,9 +442,8 @@ class TerrainRGBMerger:
 
         # Process tiles in parallel using the standalone function
         with multiprocessing.Pool(self.processes) as pool:
-            for _ in pool.imap_unordered(lambda task: _process_tile_task_with_instance(self, task), tasks, chunksize=1):
+            for _ in pool.imap_unordered(functools.partial(_process_tile_task_with_instance, self), tasks, chunksize=1):
                 pass
-
 
     def _get_tiles_for_zoom(self, zoom: int) -> List[mercantile.Tile]:
         """Get list of tiles to process for a given zoom level"""
