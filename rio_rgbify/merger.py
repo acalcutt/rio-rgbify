@@ -84,7 +84,7 @@ def process_tile_task(task_tuple: tuple) -> None:
             min_zoom=tile.z,
             max_zoom=tile.z,
             bounds=None,
-            
+           
         )
         
         # Process the tile
@@ -142,7 +142,6 @@ class TerrainRGBMerger:
             The maximum zoom level to process tiles, if None, we use the maximum available, defaults to None.
         bounds : Optional[List[float]], optional
             The bounding box to limit the tiles being generated, defaults to None. If None, the bounds of the last source will be used.
-        
         """
         print(f"__init__ called")
         self.sources = sources
@@ -158,7 +157,6 @@ class TerrainRGBMerger:
         self.max_zoom = max_zoom
         self.bounds = bounds
         self.write_queue = Queue() # initialize the shared queue
-        
     
     def _decode_tile(self, tile_data: bytes, tile: mercantile.Tile, encoding: EncodingType, source: MBTilesSource) -> Tuple[Optional[np.ndarray], dict]:
         """
@@ -490,7 +488,7 @@ class TerrainRGBMerger:
             [source.base_val for source in self.sources],
             [source.interval for source in self.sources],
             [source.mask_values for source in self.sources],
-            write_queue,
+            self.write_queue
           )
           for tile in tiles
         ]
@@ -537,10 +535,11 @@ class TerrainRGBMerger:
         print(f"process_all called with min_zoom: {min_zoom}")
         max_zoom = self.max_zoom if self.max_zoom is not None else self.get_max_zoom_level(source_conns)
         self.logger.info(f"Processing zoom levels {min_zoom} to {max_zoom}")
-        
+
         for zoom in range(min_zoom, max_zoom + 1):
             self.process_zoom_level(zoom, source_conns)
        
+
         self.logger.info("Completed processing all zoom levels")
 
 def _tile_range(start: mercantile.Tile, stop: mercantile.Tile):
