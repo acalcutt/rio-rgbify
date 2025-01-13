@@ -44,7 +44,7 @@ class ImageEncoder:
             data encoded
         """
         print(f"data_to_rgb called with shape: {data.shape}, encoding: {encoding}, interval: {interval}, base_val: {base_val}, round_digits: {round_digits}, quantized_alpha: {quantized_alpha}")
-        print(f"data: {data}")
+        print(f"data1: {data}")
         if not isinstance(data, np.ndarray):
             raise ValueError("Input data must be a numpy array")
 
@@ -61,6 +61,7 @@ class ImageEncoder:
             
         data = np.nan_to_num(data, nan=0) # Replace nan with 0 before rounding
         data = np.around(data / 2**round_digits) * 2**round_digits
+        print(f"data2: {data}")
 
         rows, cols = data.shape
         if quantized_alpha and encoding == "terrarium":
