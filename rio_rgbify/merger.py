@@ -335,7 +335,7 @@ class TerrainRGBMerger:
                     else:
                         return dst_data
 
-    def process_tile(self, tile: mercantile.Tile, source_conns: Dict[Path, sqlite3.Connection]) -> None:
+    def process_tile(self, tile: mercantile.Tile, source_conns: Dict[Path, sqlite3.Connection], write_queue: Queue) -> None:
         """Process a single tile, merging data from multiple sources"""
         #print(f"process_tile called with tile: {tile}")
         try:
@@ -354,7 +354,7 @@ class TerrainRGBMerger:
                 rgb_data = ImageEncoder.data_to_rgb(merged_elevation, self.output_encoding, 0.1, base_val=-10000, quantized_alpha=self.output_quantized_alpha if self.output_encoding == EncodingType.TERRARIUM else False) # Use the encoder from the encoders.py file
                 image_bytes = ImageEncoder.save_rgb_to_bytes(rgb_data, self.output_image_format, self.default_tile_size)
                 
-                self.write_queue.put((tile, image_bytes))
+                write_queue.put((tile, image_bytes)) # Write to the queue
                 self.logger.info(f"Successfully processed tile {tile.z}/{tile.x}/{tile.y}")
         except Exception as e:
             self.logger.error(f"Error processing tile {tile.z}/{tile.x}/{tile.y}: {e}")
@@ -426,7 +426,7 @@ class TerrainRGBMerger:
             source_conns = {}
             for source in args.sources:
               source_conns[source.path] = sqlite3.connect(source.path) # create a connection for each source.
-            merger.process_tile(args.tile, source_conns) # Pass the source connections
+            merger.process_tile(args.tile, source_conns, write_queue) # Pass the connections and queue to process tile
             for conn in source_conns.values():
               conn.close() #close the source connections when we are done.
         except Exception as e:
