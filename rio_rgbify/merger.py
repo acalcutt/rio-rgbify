@@ -135,9 +135,7 @@ class TerrainRGBMerger:
                     return None, {}
 
                 elevation = ImageEncoder._decode(rgb, source.base_val, source.interval, encoding.value)
-                self.logger.error(f"1 {elevation}")
                 elevation = ImageEncoder._mask_elevation(elevation, source.mask_values)
-                self.logger.error(f"2 {elevation}")
                 
                 bounds = mercantile.bounds(tile)
                 meta = {
@@ -151,9 +149,7 @@ class TerrainRGBMerger:
                     ),
                     'width': dataset.width,
                     'height': dataset.height
-                    
                 }
-                self.logger.error(f"4 {meta}")
                 
                 return elevation, meta
         except Exception as e:
