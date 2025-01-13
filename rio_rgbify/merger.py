@@ -38,44 +38,18 @@ class MBTilesSource:
 
 
 @dataclass
-class ProcessTileArgs:
-    """Arguments for parallel tile processing"""
-    tile: mercantile.Tile
-    sources: List[MBTilesSource]
-    output_path: Path
-    output_encoding: EncodingType
-    resampling: int
-    output_image_format: ImageFormat
-    output_quantized_alpha: bool
-
-
-@dataclass
 class TileData:
     """Container for decoded tile data"""
     data: np.ndarray
     meta: dict
     source_zoom: int
 
-@dataclass
-class TileProcessingTask:
-    """Container for all data needed to process a tile"""
-    tile: mercantile.Tile
-    sources: List[Path]  # Store paths instead of MBTilesSource objects
-    output_path: Path
-    output_encoding: str  # Store as string instead of EncodingType
-    resampling: int
-    output_image_format: str  # Store as string instead of ImageFormat
-    output_quantized_alpha: bool
-    source_encodings: List[str]  # Store encodings as strings
-    height_adjustments: List[float]
-    base_vals: List[float]
-    intervals: List[float]
-    mask_values: List[List[float]]
 
-def process_tile_task(task_and_queue: Tuple[TileProcessingTask, Queue]) -> None:
+def process_tile_task(task_and_queue: Tuple[tuple, Queue]) -> None:
     """Standalone function for processing tiles that can be pickled"""
-    task, write_queue = task_and_queue
-    
+    (tile, sources, output_path, output_encoding, resampling, output_image_format, output_quantized_alpha,
+        source_encodings, height_adjustments, base_vals, intervals, mask_values), write_queue = task_and_queue
+
     try:
         # Reconstruct MBTilesSource objects
         sources = [
@@ -88,27 +62,27 @@ def process_tile_task(task_and_queue: Tuple[TileProcessingTask, Queue]) -> None:
                 mask_values=mask_vals
             )
             for path, encoding, height_adj, base_val, interval, mask_vals in zip(
-                task.sources,
-                task.source_encodings,
-                task.height_adjustments,
-                task.base_vals,
-                task.intervals,
-                task.mask_values
+                sources,
+                source_encodings,
+                height_adjustments,
+                base_vals,
+                intervals,
+                mask_values
             )
         ]
         
         # Create merger instance
         merger = TerrainRGBMerger(
             sources=sources,
-            output_path=task.output_path,
-            output_encoding=EncodingType(task.output_encoding),
-            resampling=task.resampling,
+            output_path=output_path,
+            output_encoding=EncodingType(output_encoding),
+            resampling=resampling,
             processes=1,
             default_tile_size=512,
-            output_image_format=ImageFormat(task.output_image_format),
-            output_quantized_alpha=task.output_quantized_alpha,
-            min_zoom=task.tile.z,
-            max_zoom=task.tile.z,
+            output_image_format=ImageFormat(output_image_format),
+            output_quantized_alpha=output_quantized_alpha,
+            min_zoom=tile.z,
+            max_zoom=tile.z,
             bounds=None
         )
         
@@ -118,14 +92,14 @@ def process_tile_task(task_and_queue: Tuple[TileProcessingTask, Queue]) -> None:
             for source in sources
         }
         
-        merger.process_tile(task.tile, source_conns, write_queue)
+        merger.process_tile(tile, source_conns, write_queue)
         
         # Clean up connections
         for conn in source_conns.values():
             conn.close()
             
     except Exception as e:
-        logging.error(f"Error processing tile {task.tile}: {e}")
+        logging.error(f"Error processing tile {tile}: {e}")
         raise
 
 class TerrainRGBMerger:
@@ -281,31 +255,31 @@ class TerrainRGBMerger:
         current_x, current_y = x, y
         
         while current_zoom >= 0:
-          conn = source_conns[source.path] # get the database connection from the dictionary
-          cursor = conn.cursor()
-          cursor.execute(
+            conn = source_conns[source.path] # get the database connection from the dictionary
+            cursor = conn.cursor()
+            cursor.execute(
                 "SELECT tile_data FROM tiles WHERE zoom_level=? AND tile_column=? AND tile_row=?",
                 (current_zoom, current_x, current_y)
             )
-          result = cursor.fetchone()
+            result = cursor.fetchone()
             
-          if result is not None:
-              try:
-                  data_meta = self._decode_tile(result[0], mercantile.Tile(current_x, current_y, current_zoom), source.encoding, source) #pass in source
-                  #self.logger.debug(f"decoded data for {current_zoom}/{current_x}/{current_y}: data is {data_meta[0] is None}, meta is {data_meta[1] is None}")
-                  if data_meta[0] is None:
-                      return None
-                  if data_meta[0].size == 0:
+            if result is not None:
+                try:
+                    data_meta = self._decode_tile(result[0], mercantile.Tile(current_x, current_y, current_zoom), source.encoding, source) #pass in source
+                    #self.logger.debug(f"decoded data for {current_zoom}/{current_x}/{current_y}: data is {data_meta[0] is None}, meta is {data_meta[1] is None}")
+                    if data_meta[0] is None:
+                        return None
+                    if data_meta[0].size == 0:
+                       return None
+                    return TileData(data_meta[0], data_meta[1], current_zoom)
+                except Exception as e:
+                    self.logger.error(f"Failed to decode tile {current_zoom}/{current_x}/{current_y}: {e}")
                     return None
-                  return TileData(data_meta[0], data_meta[1], current_zoom)
-              except Exception as e:
-                  self.logger.error(f"Failed to decode tile {current_zoom}/{current_x}/{current_y}: {e}")
-                  return None
             
-          if current_zoom > 0:
+            if current_zoom > 0:
                 current_x //= 2
                 current_y //= 2
-          current_zoom -= 1
+            current_zoom -= 1
         
         return None
 
@@ -410,17 +384,8 @@ class TerrainRGBMerger:
                         return dst_data
 
     def process_tile(self, tile: mercantile.Tile, source_conns: Dict[Path, sqlite3.Connection], write_queue: Queue) -> None:
-        """Process a single tile
-        
-        Parameters
-        ----------
-        tile : mercantile.Tile
-            The tile to process
-        source_conns : Dict[Path, sqlite3.Connection]
-            Dictionary of database connections for each source
-        write_queue : Queue
-            Queue for writing processed tiles
-        """
+        """Process a single tile, merging data from multiple sources"""
+        #print(f"process_tile called with tile: {tile}")
         try:
             # Extract tiles from all sources
             tile_datas = [self._extract_tile(source, tile.z, tile.x, tile.y, source_conns) for source in self.sources]
@@ -435,10 +400,10 @@ class TerrainRGBMerger:
             if merged_elevation is not None:
                 # Encode using output format and save
                 rgb_data = ImageEncoder.data_to_rgb(
-                    merged_elevation, 
-                    self.output_encoding, 
-                    0.1, 
-                    base_val=-10000, 
+                    merged_elevation,
+                    self.output_encoding,
+                    0.1,
+                    base_val=-10000,
                     quantized_alpha=self.output_quantized_alpha if self.output_encoding == EncodingType.TERRARIUM else False
                 )
                 image_bytes = ImageEncoder.save_rgb_to_bytes(rgb_data, self.output_image_format, self.default_tile_size)
@@ -448,7 +413,7 @@ class TerrainRGBMerger:
         except Exception as e:
             self.logger.error(f"Error processing tile {tile.z}/{tile.x}/{tile.y}: {e}")
             raise
-
+        
     def _get_tiles_for_zoom(self, zoom: int) -> List[mercantile.Tile]:
         """Get list of tiles to process for a given zoom level
         
@@ -488,85 +453,8 @@ class TerrainRGBMerger:
         
         return list(tiles)
 
-    @staticmethod
-    def _process_tile_with_queue(args_and_queue: tuple) -> None:
-        """Static wrapper method for parallel tile processing that includes queue
-        
-        Parameters
-        ----------
-        args_and_queue : tuple
-            Tuple containing (ProcessTileArgs, Queue)
-        """
-        args, write_queue = args_and_queue
-        try:
-            merger = TerrainRGBMerger(
-                sources=args.sources,
-                output_path=args.output_path,
-                output_encoding=args.output_encoding,
-                resampling=args.resampling,
-                processes=1,
-                default_tile_size=512,
-                output_image_format=args.output_image_format,
-                output_quantized_alpha=args.output_quantized_alpha,
-                min_zoom=args.tile.z,
-                max_zoom=args.tile.z,
-                bounds=None
-            )
-            source_conns = {}
-            for source in args.sources:
-                source_conns[source.path] = sqlite3.connect(source.path)
-            merger.process_tile(args.tile, source_conns, write_queue)
-            for conn in source_conns.values():
-                conn.close()
-        except Exception as e:
-            logging.error(f"Error processing tile {args.tile}: {e}")
 
-    def process_tile_multiprocess(self, task_tuple: tuple) -> None:
-        """Process a single tile for multiprocessing
-        
-        Parameters
-        ----------
-        task_tuple : tuple
-            Tuple containing (tile, sources, write_queue)
-        """
-        tile, sources, write_queue = task_tuple
-        try:
-            source_conns = {}
-            for source in sources:
-                source_conns[source.path] = sqlite3.connect(source.path)
-            self.process_tile(tile, source_conns, write_queue)
-            for conn in source_conns.values():
-                conn.close()
-        except Exception as e:
-            self.logger.error(f"Error processing tile {tile}: {e}")
-            raise
-
-    def process_zoom_level(self, zoom: int):
-        """Process all tiles for a given zoom level in parallel"""
-        print(f"process_zoom_level called with zoom: {zoom}")
-        self.logger.info(f"Processing zoom level {zoom}")
-        
-        # Get list of tiles to process
-        tiles = self._get_tiles_for_zoom(zoom)
-        self.logger.info(f"Found {len(tiles)} tiles to process")
-        
-        # Create task tuples for starmap
-        tasks = [(tile, self.sources, self.write_queue) for tile in tiles]
-        
-        # Create writer process
-        writer_process = multiprocessing.Process(target=self._writer_process, args=(self.write_queue,))
-        writer_process.start()
-        
-        # Process tiles in parallel using starmap
-        with multiprocessing.Pool(self.processes) as pool:
-            pool.starmap(self.process_tile_multiprocess, tasks)
-        
-        # Clean up
-        self.write_queue.put(None)
-        self.write_queue.join()
-        writer_process.join()
-
-
+    
     def _writer_process(self, write_queue: Queue):
         """Writes to the db using a shared queue"""
         with MBTilesDatabase(self.output_path) as db:
@@ -578,15 +466,8 @@ class TerrainRGBMerger:
                 db.insert_tile([tile.x, tile.y, tile.z], image_bytes)
                 write_queue.task_done()
 
-
     def process_zoom_level(self, zoom: int):
-        """Process all tiles for a given zoom level in parallel
-        
-        Parameters
-        ----------
-        zoom : int
-            The zoom level to process
-        """
+        """Process all tiles for a given zoom level in parallel"""
         print(f"process_zoom_level called with zoom: {zoom}")
         self.logger.info(f"Processing zoom level {zoom}")
         
@@ -594,34 +475,35 @@ class TerrainRGBMerger:
         tiles = self._get_tiles_for_zoom(zoom)
         self.logger.info(f"Found {len(tiles)} tiles to process")
         
-        # Prepare arguments for parallel processing
-        process_args = [
-            ProcessTileArgs(
-                tile=tile,
-                sources=self.sources,
-                output_path=self.output_path,
-                output_encoding=self.output_encoding,
-                resampling=self.resampling,
-                output_image_format = self.output_image_format,
-                output_quantized_alpha=self.output_quantized_alpha,
-            )
-            for tile in tiles
+        # Create task tuples
+        tasks = [
+          (
+            tile,
+            [source.path for source in self.sources],
+            self.output_path,
+            self.output_encoding.value,
+            self.resampling,
+            self.output_image_format.value,
+            self.output_quantized_alpha,
+            [source.encoding.value for source in self.sources],
+            [source.height_adjustment for source in self.sources],
+            [source.base_val for source in self.sources],
+            [source.interval for source in self.sources],
+            [source.mask_values for source in self.sources],
+          )
+          for tile in tiles
         ]
-        
+
         # Create the writer process
         writer_process = multiprocessing.Process(target=self._writer_process, args=(self.write_queue,))
         writer_process.start()
-
-        # Process tiles in parallel - Fixed the imap_unordered call
-        with multiprocessing.Pool(self.processes) as pool:
-            for _ in pool.imap_unordered(
-                lambda x: self._process_tile_wrapper(x, self.write_queue), 
-                process_args,
-                chunksize=1
-            ):
-                pass
         
-        # Put the None value to stop the writer and wait for queue to empty
+        # Process tiles in parallel using starmap, also passing the queue to each worker
+        with multiprocessing.Pool(self.processes) as pool:
+          for _ in pool.imap_unordered(process_tile_task, [(task, self.write_queue) for task in tasks], chunksize=1):
+            pass
+
+        # Clean up
         self.write_queue.put(None)
         self.write_queue.join()
         writer_process.join()
@@ -658,6 +540,6 @@ class TerrainRGBMerger:
         self.logger.info("Completed processing all zoom levels")
 
 def _tile_range(start: mercantile.Tile, stop: mercantile.Tile):
-  for x in range(start.x, stop.x + 1):
-    for y in range(start.y, stop.y + 1):
-      yield x, y
+    for x in range(start.x, stop.x + 1):
+        for y in range(start.y, stop.y + 1):
+            yield x, y
