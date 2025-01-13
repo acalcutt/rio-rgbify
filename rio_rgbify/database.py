@@ -17,7 +17,7 @@ class MBTilesDatabase:
 
         self.conn = sqlite3.connect(self.outpath)
         # Wall mode : Speedup by 10 the speed of writing in the database
-        self.conn.execute('pragma journal_mode=wal')
+        #self.conn.execute('pragma journal_mode=wal')
         self.cur = self.conn.cursor()
         
         # create the tiles table
@@ -58,7 +58,7 @@ class MBTilesDatabase:
     def __exit__(self, exc_type, exc_val, exc_tb):
         self.conn.commit()
         # disable Wall mode
-        self.conn.execute('pragma journal_mode=DELETE')
+        #self.conn.execute('pragma journal_mode=DELETE')
         self.conn.close()
 
     def add_metadata(self, metadata: dict):
