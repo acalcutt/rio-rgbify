@@ -47,10 +47,12 @@ class TileData:
 
 def process_tile_task(task_tuple: tuple) -> None:
     """Standalone function for processing tiles that can be pickled"""
-    tile, sources, output_path, output_encoding, resampling, output_image_format, output_quantized_alpha, source_encodings, height_adjustments, base_vals, intervals, mask_values, source_conns, write_queue = task_tuple
+    tile, sources, output_path, output_encoding, resampling, output_image_format, output_quantized_alpha, source_encodings, height_adjustments, base_vals, intervals, mask_values, write_queue = task_tuple
+    
     try:
         # Reconstruct MBTilesSource objects
-        sources = [
+        source_conns = {}
+        sources_objs = [
             MBTilesSource(
                 path=path,
                 encoding=EncodingType(encoding),
@@ -68,10 +70,11 @@ def process_tile_task(task_tuple: tuple) -> None:
                 mask_values
             )
         ]
-        
+        for source in sources_objs:
+            source_conns[source.path] = sqlite3.connect(source.path)
         # Create merger instance
         merger = TerrainRGBMerger(
-            sources=sources,
+            sources=sources_objs,
             output_path=output_path,
             output_encoding=EncodingType(output_encoding),
             resampling=resampling,
@@ -81,12 +84,15 @@ def process_tile_task(task_tuple: tuple) -> None:
             output_quantized_alpha=output_quantized_alpha,
             min_zoom=tile.z,
             max_zoom=tile.z,
-            bounds=None
+            bounds=None,
         )
         
         # Process the tile
         merger.process_tile(tile, source_conns, write_queue)
-        
+
+        for conn in source_conns.values():
+            conn.close()
+            
     except Exception as e:
         logging.error(f"Error processing tile {tile}: {e}")
         raise
@@ -108,7 +114,7 @@ class TerrainRGBMerger:
         min_zoom: int = 0,
         max_zoom: Optional[int] = None,
         bounds: Optional[List[float]] = None,
-        source_conns: Optional[Dict[Path, sqlite3.Connection]] = None
+        source_conns: Optional[Dict[Path, sqlite3.Connection]] = None,
     ):
         """
         Initializes the TerrainRGBMerger.
@@ -138,7 +144,7 @@ class TerrainRGBMerger:
         bounds : Optional[List[float]], optional
             The bounding box to limit the tiles being generated, defaults to None. If None, the bounds of the last source will be used.
         source_conns :  Optional[Dict[Path, sqlite3.Connection]], optional
-          A dictionary containing the opened source database connections.
+            A dictionary containing the opened source database connections.
         """
         print(f"__init__ called")
         self.sources = sources
@@ -154,7 +160,7 @@ class TerrainRGBMerger:
         self.max_zoom = max_zoom
         self.bounds = bounds
         self.write_queue = Queue() # initialize the shared queue
-        self.source_conns = source_conns
+        
     
     def _decode_tile(self, tile_data: bytes, tile: mercantile.Tile, encoding: EncodingType, source: MBTilesSource) -> Tuple[Optional[np.ndarray], dict]:
         """
@@ -535,10 +541,10 @@ class TerrainRGBMerger:
         max_zoom = self.max_zoom if self.max_zoom is not None else self.get_max_zoom_level(source_conns)
         self.logger.info(f"Processing zoom levels {min_zoom} to {max_zoom}")
 
-
         for zoom in range(min_zoom, max_zoom + 1):
             self.process_zoom_level(zoom, source_conns)
         
+
         self.logger.info("Completed processing all zoom levels")
 
 def _tile_range(start: mercantile.Tile, stop: mercantile.Tile):
