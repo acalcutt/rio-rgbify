@@ -154,27 +154,23 @@ class TerrainRGBMerger:
                     self.logger.error(f"Unexpected RGB shape in tile {tile.z}/{tile.x}/{tile.y}: {rgb.shape}")
                     return None, {}
 
-                if encoding == EncodingType.MAPBOX:
-                   elevation = ImageEncoder._decode(rgb, source.base_val, source.interval, encoding.value)
-                elif encoding == EncodingType.TERRARIUM:
-                   elevation = ImageEncoder._decode(rgb, 0, 1, encoding.value)
-                else:
-                  raise ValueError(f"Invalid encoding type: {encoding}")
-
+                elevation = ImageEncoder._decode(rgb, source.base_val, source.interval, encoding.value) # Use the static decode method from the encoder
                 elevation = ImageEncoder._mask_elevation(elevation, source.mask_values)
                 
                 bounds = mercantile.bounds(tile)
-                meta = dict(dataset.meta.copy())
-                meta.update({
+                
+                meta =  {
                     'count': 1,
                     'dtype': rasterio.float32,
                     'driver': 'GTiff',
                     'crs': 'EPSG:3857',
                     'transform': rasterio.transform.from_bounds(
                         bounds.west, bounds.south, bounds.east, bounds.north,
-                        meta['width'], meta['height']
-                    )
-                })
+                        dataset.meta['width'], dataset.meta['height']
+                    ),
+                    'width': dataset.meta['width'],
+                    'height': dataset.meta['height']
+                }
                 
                 #self.logger.debug(f"Decoded elevation: min={np.nanmin(elevation)}, max={np.nanmax(elevation)}")
                 return elevation, meta
