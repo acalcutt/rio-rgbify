@@ -14,10 +14,6 @@ from typing import Optional, Tuple, List
 from contextlib import contextmanager
 from rio_rgbify.database import MBTilesDatabase
 from rio_rgbify.image import ImageFormat, ImageEncoder
-import sys
-
-
-buffer = bytes if sys.version_info > (3,) else buff
 
 class EncodingType(Enum):
     MAPBOX = "mapbox"
@@ -354,7 +350,7 @@ class TerrainRGBMerger:
                 rgb_data = ImageEncoder.data_to_rgb(merged_elevation, self.output_encoding, 0.1, base_val=-10000, quantized_alpha=self.output_quantized_alpha if self.output_encoding == EncodingType.TERRARIUM else False) # Use the encoder from the encoders.py file
                 with MBTilesDatabase(self.output_path) as db:
                   image_bytes = ImageEncoder.save_rgb_to_bytes(rgb_data, self.output_image_format, self.default_tile_size)
-                  db.insert_tile(tile = [tile.x, tile.y, tile.z], contents = image_bytes)
+                  MBTilesDatabase.insert_tile(tile = [tile.x, tile.y, tile.z], contents = image_bytes)
                 self.logger.info(f"Successfully processed tile {tile.z}/{tile.x}/{tile.y}")
         except Exception as e:
             self.logger.error(f"Error processing tile {tile.z}/{tile.x}/{tile.y}: {e}")
