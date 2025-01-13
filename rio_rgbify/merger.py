@@ -140,19 +140,19 @@ class TerrainRGBMerger:
                 self.logger.error(f"2 {elevation}")
                 
                 bounds = mercantile.bounds(tile)
-                meta = dataset.meta.copy()
-                
-                self.logger.error(f"3 {meta}")
-                meta.update({
+                meta = {
                     'count': 1,
-                    'dtype': rasterio.float32,
+                    'dtype': str(rasterio.float32),
                     'driver': 'GTiff',
-                    'crs': 'EPSG:3857',
+                    'crs': str(dataset.crs),
                     'transform': rasterio.transform.from_bounds(
                         bounds.west, bounds.south, bounds.east, bounds.north,
-                        meta['width'], meta['height']
-                    )
-                })
+                        dataset.width, dataset.height
+                    ),
+                    'width': dataset.width,
+                    'height': dataset.height
+                    
+                }
                 self.logger.error(f"4 {meta}")
                 
                 return elevation, meta
