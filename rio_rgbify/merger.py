@@ -44,7 +44,7 @@ class TileData:
     meta: dict
     source_zoom: int
 
-def process_tile_task(task_tuple: tuple) -> None:
+def process_tile_task(merger_instance: TerrainRGBMerger, task_tuple: tuple) -> None:
     """Standalone function for processing tiles that can be pickled"""
     tile, source_configs, output_path, output_encoding, resampling, output_format, output_alpha = task_tuple
     
@@ -69,14 +69,14 @@ def process_tile_task(task_tuple: tuple) -> None:
         # Extract tiles from all sources
         tile_datas = []
         for source in sources:
-            tile_data = TerrainRGBMerger.extract_tile(source, tile.z, tile.x, tile.y, source_conns)
+            tile_data = merger_instance._extract_tile(source, tile.z, tile.x, tile.y, source_conns)
             tile_datas.append(tile_data)
 
         if not any(tile_datas):
             return
 
         # Merge the elevation data
-        merged_elevation = TerrainRGBMerger.merge_tiles(tile_datas, tile)
+        merged_elevation = merger_instance._merge_tiles(tile_datas, tile)
         
         if merged_elevation is not None:
             # Encode using output format
@@ -150,7 +150,7 @@ class TerrainRGBMerger:
             The maximum zoom level to process tiles, if None, we use the maximum available, defaults to None.
         bounds : Optional[List[float]], optional
             The bounding box to limit the tiles being generated, defaults to None. If None, the bounds of the last source will be used.
-       
+        
         """
         print(f"__init__ called")
         self.sources = sources
@@ -274,7 +274,7 @@ class TerrainRGBMerger:
                     if data_meta[0] is None:
                         return None
                     if data_meta[0].size == 0:
-                       return None
+                        return None
                     return TileData(data_meta[0], data_meta[1], current_zoom)
                 except Exception as e:
                     self.logger.error(f"Failed to decode tile {current_zoom}/{current_x}/{current_y}: {e}")
@@ -347,9 +347,9 @@ class TerrainRGBMerger:
                 return tile_data.data
         else:
             source_tile = mercantile.Tile(x=target_tile.x // (2**(target_tile.z - tile_data.source_zoom)),
-                                            y=target_tile.y // (2**(target_tile.z - tile_data.source_zoom)),
-                                            z=tile_data.source_zoom
-                                            )
+                                         y=target_tile.y // (2**(target_tile.z - tile_data.source_zoom)),
+                                         z=tile_data.source_zoom
+                                         )
             source_bounds = mercantile.bounds(source_tile)
 
             x_offset = (target_tile.x % (2**(target_tile.z - tile_data.source_zoom)))
@@ -385,7 +385,7 @@ class TerrainRGBMerger:
                     if dst_data.ndim == 3:
                        return dst_data[0]
                     else:
-                        return dst_data
+                       return dst_data
 
     def process_tile(self, tile: mercantile.Tile, source_conns: Dict[Path, sqlite3.Connection], write_queue: Queue) -> None:
         """Process a single tile, merging data from multiple sources"""
@@ -435,9 +435,9 @@ class TerrainRGBMerger:
         tiles = set()
         
         if self.bounds is not None:
-          w,s,e,n = self.bounds
-          for x, y in _tile_range(mercantile.tile(w, n, zoom), mercantile.tile(e, s, zoom)):
-            tiles.add(mercantile.Tile(x=x, y=y, z=zoom))
+            w,s,e,n = self.bounds
+            for x, y in _tile_range(mercantile.tile(w, n, zoom), mercantile.tile(e, s, zoom)):
+                tiles.add(mercantile.Tile(x=x, y=y, z=zoom))
         else:
             # Get tiles from the LAST source
             source = self.sources[-1]
@@ -486,7 +486,7 @@ class TerrainRGBMerger:
             (
                 tile,
                 [(s.path, s.encoding.value, s.height_adjustment, s.base_val, s.interval, s.mask_values) 
-                 for s in self.sources],
+                for s in self.sources],
                 self.output_path,
                 self.output_encoding.value,
                 self.resampling,
@@ -498,7 +498,7 @@ class TerrainRGBMerger:
         
         # Process tiles in parallel using the standalone function
         with multiprocessing.Pool(self.processes) as pool:
-            for _ in pool.imap_unordered(process_tile_task, tasks, chunksize=1):
+            for _ in pool.imap_unordered(lambda task: process_tile_task(self, task), tasks, chunksize=1):
                 pass
 
     def _get_tiles_for_zoom(self, zoom: int) -> List[mercantile.Tile]:
