@@ -5,6 +5,7 @@ import rasterio
 from rasterio._io import virtual_file_to_buffer
 from enum import Enum
 import bisect
+import logging
 
 class ImageFormat(Enum):
     PNG = "png"
@@ -82,10 +83,9 @@ class ImageEncoder:
                 rgb[1] = np.floor(data % 256)
                 rgb[2] = np.floor((data - np.floor(data)) * 256)
             else:
-                rgb[0] = np.floor((data // (256 * 256)) % 256)
-                rgb[1] = np.floor((data // 256) % 256)
-                rgb[2] = np.floor(data % 256)
-
+                rgb[0] = np.floor((data / (256 * 256)) % 256).astype(np.uint8)
+                rgb[1] = np.floor((data / 256) % 256).astype(np.uint8)
+                rgb[2] = np.floor(data % 256).astype(np.uint8)
             return rgb
     
     @staticmethod
@@ -248,6 +248,7 @@ class ImageEncoder:
         bytes:
             bytes for a image encoded to the given output format
         """
+        print(f"save_rgb_to_bytes called with rgb data shape {rgb_data.shape}")
         image_bytes = BytesIO()
         if rgb_data.size > 0:
             if rgb_data.ndim == 3:
