@@ -14,6 +14,7 @@ from typing import Optional, Tuple, List
 from contextlib import contextmanager
 from rio_rgbify.database import MBTilesDatabase
 from rio_rgbify.image import ImageFormat, ImageEncoder
+from queue import Queue
 
 class EncodingType(Enum):
     MAPBOX = "mapbox"
@@ -43,6 +44,7 @@ class ProcessTileArgs:
     resampling: int
     output_image_format: ImageFormat
     output_quantized_alpha: bool
+    write_queue: Queue # Add the write queue to the ProcessTileArgs
 
 @dataclass
 class TileData:
@@ -110,6 +112,7 @@ class TerrainRGBMerger:
         self.min_zoom = min_zoom
         self.max_zoom = max_zoom
         self.bounds = bounds
+        self.write_queue = Queue() # initialize the shared queue
     
     def _decode_tile(self, tile_data: bytes, tile: mercantile.Tile, encoding: EncodingType, source: MBTilesSource) -> Tuple[Optional[np.ndarray], dict]:
         """
@@ -326,7 +329,7 @@ class TerrainRGBMerger:
                     else:
                         return dst_data
 
-    def process_tile(self, tile: mercantile.Tile) -> None:
+    def process_tile(self, tile: mercantile.Tile, write_queue: Queue) -> None:
         """Process a single tile, merging data from multiple sources"""
         #print(f"process_tile called with tile: {tile}")
         try:
@@ -343,9 +346,9 @@ class TerrainRGBMerger:
             if merged_elevation is not None:
                 # Encode using output format and save
                 rgb_data = ImageEncoder.data_to_rgb(merged_elevation, self.output_encoding, 0.1, base_val=-10000, quantized_alpha=self.output_quantized_alpha if self.output_encoding == EncodingType.TERRARIUM else False) # Use the encoder from the encoders.py file
-                with MBTilesDatabase(self.output_path) as db:
-                    image_bytes = ImageEncoder.save_rgb_to_bytes(rgb_data, self.output_image_format, self.default_tile_size)
-                    db.insert_tile(tile = [tile.x, tile.y, tile.z], contents = image_bytes)
+                image_bytes = ImageEncoder.save_rgb_to_bytes(rgb_data, self.output_image_format, self.default_tile_size)
+                
+                write_queue.put((tile, image_bytes))
                 self.logger.info(f"Successfully processed tile {tile.z}/{tile.x}/{tile.y}")
         except Exception as e:
             self.logger.error(f"Error processing tile {tile.z}/{tile.x}/{tile.y}: {e}")
@@ -414,10 +417,21 @@ class TerrainRGBMerger:
                 max_zoom = args.tile.z,
                 bounds = None
             )
-            merger.process_tile(args.tile)
+            merger.process_tile(args.tile, args.write_queue) # Pass in the shared queue
         except Exception as e:
             logging.error(f"Error processing tile {args.tile}: {e}")
-            
+    
+    def _writer_process(self, write_queue: Queue):
+        """Writes to the db using a shared queue"""
+        with MBTilesDatabase(self.output_path) as db:
+            while True:
+                item = write_queue.get()
+                if item is None:
+                    break
+                tile, image_bytes = item
+                db.insert_tile(tile = [tile.x, tile.y, tile.z], contents = image_bytes)
+                write_queue.task_done()
+
     def process_zoom_level(self, zoom: int):
         """Process all tiles for a given zoom level in parallel
         
@@ -442,15 +456,25 @@ class TerrainRGBMerger:
                 output_encoding=self.output_encoding,
                 resampling=self.resampling,
                 output_image_format = self.output_image_format,
-                output_quantized_alpha=self.output_quantized_alpha
+                output_quantized_alpha=self.output_quantized_alpha,
+                write_queue = self.write_queue
             )
             for tile in tiles
         ]
         
+        # Create the writer process
+        writer_process = multiprocessing.Process(target=self._writer_process, args=(self.write_queue,))
+        writer_process.start()
+
         # Process tiles in parallel
         with multiprocessing.Pool(self.processes) as pool:
             for _ in pool.imap_unordered(self._process_tile_wrapper, process_args):
                 pass
+        
+        # Put the None value to stop the writer and wait for queue to empty
+        self.write_queue.put(None)
+        self.write_queue.join()
+        writer_process.join()
 
     def get_max_zoom_level(self) -> int:
         """Get the maximum zoom level from the last source
