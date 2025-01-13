@@ -12,6 +12,9 @@ from pathlib import Path
 from rio_rgbify.mbtiler import RGBTiler
 from rio_rgbify.merger import TerrainRGBMerger, MBTilesSource, EncodingType, ImageFormat
 from rio_rgbify.image import ImageEncoder
+from typing import Dict
+import sqlite3
+
 
 def _rgb_worker(data, window, ij, g_args):
     return ImageEncoder.data_to_rgb(
@@ -131,7 +134,6 @@ def rgbify(
         with RioMucho(
             [src_path], dst_path, _rgb_worker, options=meta, global_args=gargs
         ) as rm:
-
             rm.run(workers)
 
     elif dst_path.split(".")[-1].lower() == "mbtiles":
@@ -189,18 +191,19 @@ def merge(config, workers, verbose):
         config_data = json.load(f)
 
     sources = []
+    source_connections = {}
     for source_data in config_data.get("sources", []):
-        sources.append(
-            MBTilesSource(
-                path=Path(source_data["path"]),
-                encoding=EncodingType(source_data.get("encoding", "mapbox")),
-                height_adjustment=float(source_data.get("height_adjustment", 0.0)),
-                base_val=float(source_data.get("base_val",-10000)),
-                interval=float(source_data.get("interval",0.1)),
-                mask_values = config_data.get("mask_values",[0.0, -1.0])
+        source = MBTilesSource(
+            path=Path(source_data["path"]),
+            encoding=EncodingType(source_data.get("encoding", "mapbox")),
+            height_adjustment=float(source_data.get("height_adjustment", 0.0)),
+            base_val=float(source_data.get("base_val",-10000)),
+            interval=float(source_data.get("interval",0.1)),
+            mask_values = config_data.get("mask_values",[0.0, -1.0])
             )
-        )
-        
+        source_connections[source.path] = sqlite3.connect(source.path)
+        sources.append(source)
+    
     output_path = Path(config_data.get("output_path", "output.mbtiles"))
     output_encoding = EncodingType(config_data.get("output_encoding", "mapbox"))
     output_format = ImageFormat(config_data.get("output_format", "png"))
@@ -223,7 +226,6 @@ def merge(config, workers, verbose):
                 "Bounding box of  is not valid, must be a comma seperated list of 4 floats in the order west, south, east, north".format(bounds)
             )
 
-
     merger = TerrainRGBMerger(
         sources = sources,
         output_path = output_path,
@@ -234,7 +236,12 @@ def merge(config, workers, verbose):
         output_quantized_alpha = output_quantized_alpha,
         min_zoom = min_zoom,
         max_zoom = max_zoom,
-        bounds = bounds
+        bounds = bounds,
+        source_conns = source_connections
     )
     
-    merger.process_all(min_zoom=min_zoom if min_zoom is not None else 0)
+    try:
+      merger.process_all(min_zoom=min_zoom if min_zoom is not None else 0, source_conns = source_connections)
+    finally:
+      for conn in source_connections.values():
+        conn.close()
