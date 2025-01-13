@@ -42,6 +42,5 @@ setup(name="rio-rgbify",
       [rasterio.rio_plugins]
       rgbify=rio_rgbify.scripts.cli:rgbify
       merge=rio_rgbify.scripts.cli:merge
-      list-resampling=rio_rgbify.scripts.cli:list-resampling
       """
      )

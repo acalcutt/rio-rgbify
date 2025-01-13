@@ -238,10 +238,3 @@ def merge(config, workers, verbose):
     )
     
     merger.process_all(min_zoom=min_zoom if min_zoom is not None else 0)
-
-@cli.command("list-resampling")
-def list_resampling():
-  """Lists the valid resampling options"""
-  click.echo("Available resampling methods:")
-  for method in Resampling:
-      click.echo(f" - {method.name.lower()}")
