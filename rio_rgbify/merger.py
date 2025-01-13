@@ -428,7 +428,7 @@ class TerrainRGBMerger:
         source_conns = {}
         for s in self.sources:
             source_conns[s.path] = sqlite3.connect(s.path)
-
+        
         # Get list of tiles to process
         tiles = self._get_tiles_for_zoom(zoom, source_conns)
         self.logger.info(f"Found {len(tiles)} tiles to process")
@@ -461,7 +461,7 @@ class TerrainRGBMerger:
                 conn.close()
 
 
-    def _get_tiles_for_zoom(self, zoom: int) -> List[mercantile.Tile]:
+    def _get_tiles_for_zoom(self, zoom: int, source_conns:  Dict[Path, sqlite3.Connection]) -> List[mercantile.Tile]:
         """Get list of tiles to process for a given zoom level"""
         tiles = set()
         
