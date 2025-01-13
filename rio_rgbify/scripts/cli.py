@@ -7,7 +7,7 @@ import numpy as np
 from riomucho import RioMucho
 import json
 from rasterio.rio.options import creation_options
-from rasterio.enums import Resampling
+from rasterio.warp import Resampling
 from pathlib import Path
 from rio_rgbify.mbtiler import RGBTiler
 from rio_rgbify.merger import TerrainRGBMerger, MBTilesSource, EncodingType, ImageFormat
