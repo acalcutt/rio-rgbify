@@ -550,9 +550,8 @@ def process_tile_task(task_tuple: tuple) -> None:
             image_bytes = ImageEncoder.save_rgb_to_bytes(rgb_data, output_format)
             
             # Write to output database
-            with sqlite3.connect(output_path) as conn:
-                db = MBTilesDatabase(output_path)
-                db.insert_tile([tile.x, tile.y, tile.z], image_bytes)
+            with MBTilesDatabase(output_path) as db:
+               db.insert_tile([tile.x, tile.y, tile.z], image_bytes)
 
     except Exception as e:
         logging.error(f"Error processing tile {tile.z}/{tile.x}/{tile.y}: {e}")
@@ -560,7 +559,8 @@ def process_tile_task(task_tuple: tuple) -> None:
     finally:
         # Clean up connections
         for conn in source_conns.values():
-            conn.close()
+            if conn:
+                conn.close()
 
 def _tile_range(start: mercantile.Tile, stop: mercantile.Tile):
     for x in range(start.x, stop.x + 1):
