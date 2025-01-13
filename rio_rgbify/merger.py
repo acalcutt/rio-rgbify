@@ -336,6 +336,7 @@ class TerrainRGBMerger:
         #print(f"process_tile called with tile: {tile}")
         try:
             # Extract tiles from all sources
+            self.logger.debug(f"Start process tile  {tile.z}/{tile.x}/{tile.y}")
             tile_datas = [self._extract_tile(source, tile.z, tile.x, tile.y, source_conns) for source in self.sources]
             self.logger.debug(f"tile datas: {len(tile_datas)}")
 
@@ -410,6 +411,17 @@ class TerrainRGBMerger:
                         self.logger.warning(f"Skipping invalid row: {row}")
         
         return list(tiles)
+    
+    def _writer_process(self, write_queue: Queue):
+        """Writes to the db using a shared queue"""
+        with MBTilesDatabase(self.output_path) as db:
+            while True:
+                item = write_queue.get()
+                if item is None:
+                    break
+                tile, image_bytes = item
+                db.insert_tile([tile.x, tile.y, tile.z], image_bytes)
+                write_queue.task_done()
 
     def process_zoom_level(self, zoom: int):
         """Process all tiles for a given zoom level in parallel"""
@@ -450,7 +462,7 @@ class TerrainRGBMerger:
                 conn.close()
 
 
-    def _get_tiles_for_zoom(self, zoom: int, source_conns:  Dict[Path, sqlite3.Connection]) -> List[mercantile.Tile]:
+    def _get_tiles_for_zoom(self, zoom: int) -> List[mercantile.Tile]:
         """Get list of tiles to process for a given zoom level"""
         tiles = set()
         
@@ -504,6 +516,14 @@ def process_tile_task(task_tuple: tuple) -> None:
     """Standalone function for processing tiles that can be pickled"""
     tile, source_configs, output_path, output_encoding, resampling, output_format, output_alpha = task_tuple
     
+    # Configure logging for each process
+    logging.basicConfig(
+        level=logging.DEBUG, # set logging to debug
+        format='%(asctime)s - %(name)s - %(levelname)s - %(message)s'
+    )
+    logger = logging.getLogger(__name__)
+    logger.debug(f"process_tile_task started for tile {tile.z}/{tile.x}/{tile.y}")
+
     try:
         # Create connections for each source
         source_conns = {}
