@@ -426,7 +426,7 @@ class TerrainRGBMerger:
             source_conns = {}
             for source in args.sources:
               source_conns[source.path] = sqlite3.connect(source.path) # create a connection for each source.
-            merger.process_tile(args.tile, source_conns) # Pass the connection to process tile
+            merger.process_tile(args.tile, source_conns) # Pass the source connections
             for conn in source_conns.values():
               conn.close() #close the source connections when we are done.
         except Exception as e:
