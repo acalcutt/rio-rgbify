@@ -80,7 +80,7 @@ class MBTilesDatabase:
 
         return h
 
-    def insert_tile(self, tile: List[int], contents: bytes):
+    def insert_tile(tile: List[int], contents: bytes):
       """Add tile to database with deduplication logic"""
       x, y, z = tile
       # mbtiles use inverse y indexing
