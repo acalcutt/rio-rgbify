@@ -407,6 +407,8 @@ class TerrainRGBMerger:
         ----------
         args : ProcessTileArgs
             The arguments for the processing of a tile
+        write_queue : Queue
+            The queue for writing processed tiles
         """
         print(f"_process_tile_wrapper called with args: {args}")
         try:
@@ -476,9 +478,13 @@ class TerrainRGBMerger:
         writer_process = multiprocessing.Process(target=self._writer_process, args=(self.write_queue,))
         writer_process.start()
 
-        # Process tiles in parallel
+        # Process tiles in parallel - Fixed the imap_unordered call
         with multiprocessing.Pool(self.processes) as pool:
-            for _ in pool.imap_unordered(self._process_tile_wrapper, process_args, [self.write_queue for _ in process_args]):
+            for _ in pool.imap_unordered(
+                lambda x: self._process_tile_wrapper(x, self.write_queue), 
+                process_args,
+                chunksize=1
+            ):
                 pass
         
         # Put the None value to stop the writer and wait for queue to empty
