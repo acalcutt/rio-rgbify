@@ -44,6 +44,7 @@ class ImageEncoder:
             data encoded
         """
         print(f"data_to_rgb called with shape: {data.shape}, encoding: {encoding}, interval: {interval}, base_val: {base_val}, round_digits: {round_digits}, quantized_alpha: {quantized_alpha}")
+        print(f"data: {data}")
         if not isinstance(data, np.ndarray):
             raise ValueError("Input data must be a numpy array")
 
