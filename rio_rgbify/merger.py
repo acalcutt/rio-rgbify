@@ -27,7 +27,7 @@ class MBTilesSource:
     height_adjustment: float = 0.0 # Added height adjustment
     base_val: float = -10000 # Add base val, with default of -10000 for mapbox
     interval: float = 0.1 # Add interval with default of 0.1 for mapbox
-    mask_values: list = [0.0]
+    mask_values: list = field(default_factory=lambda: [0.0])
 
     def __post_init__(self):
         if not self.path.exists():
