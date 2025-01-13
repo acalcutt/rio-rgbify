@@ -47,7 +47,7 @@ class TileData:
 
 def process_tile_task(task_tuple: tuple) -> None:
     """Standalone function for processing tiles that can be pickled"""
-    tile, sources, output_path, output_encoding, resampling, output_image_format, output_quantized_alpha, source_encodings, height_adjustments, base_vals, intervals, mask_values, write_queue = task_tuple
+    tile, sources, output_path, output_encoding, resampling, output_image_format, output_quantized_alpha, source_encodings, height_adjustments, base_vals, intervals, mask_values, merger_queue = task_tuple
     try:
         # Reconstruct MBTilesSource objects
         source_conns = {}
@@ -84,12 +84,10 @@ def process_tile_task(task_tuple: tuple) -> None:
             min_zoom=tile.z,
             max_zoom=tile.z,
             bounds=None,
-           
         )
         
         # Process the tile
-        merger.process_tile(tile, source_conns, write_queue)
-
+        merger.process_tile(tile, source_conns, merger.write_queue)
         for conn in source_conns.values():
             conn.close()
         
@@ -142,6 +140,7 @@ class TerrainRGBMerger:
             The maximum zoom level to process tiles, if None, we use the maximum available, defaults to None.
         bounds : Optional[List[float]], optional
             The bounding box to limit the tiles being generated, defaults to None. If None, the bounds of the last source will be used.
+       
         """
         print(f"__init__ called")
         self.sources = sources
@@ -538,7 +537,7 @@ class TerrainRGBMerger:
 
         for zoom in range(min_zoom, max_zoom + 1):
             self.process_zoom_level(zoom, source_conns)
-       
+        
 
         self.logger.info("Completed processing all zoom levels")
 
