@@ -6,10 +6,12 @@ import numpy as np
 import io
 from PIL import Image
 import multiprocessing
+from multiprocessing import Pool, Process, Queue
 from pathlib import Path
 import logging
 from enum import Enum
 from dataclasses import dataclass, field
+from typing import List, Optional, Dict, Tuple
 from typing import Optional, Tuple, List, Dict
 from contextlib import contextmanager
 from rio_rgbify.database import MBTilesDatabase
@@ -53,6 +55,78 @@ class TileData:
     data: np.ndarray
     meta: dict
     source_zoom: int
+
+@dataclass
+class TileProcessingTask:
+    """Container for all data needed to process a tile"""
+    tile: mercantile.Tile
+    sources: List[Path]  # Store paths instead of MBTilesSource objects
+    output_path: Path
+    output_encoding: str  # Store as string instead of EncodingType
+    resampling: int
+    output_image_format: str  # Store as string instead of ImageFormat
+    output_quantized_alpha: bool
+    source_encodings: List[str]  # Store encodings as strings
+    height_adjustments: List[float]
+    base_vals: List[float]
+    intervals: List[float]
+    mask_values: List[List[float]]
+
+def process_tile_task(task_and_queue: Tuple[TileProcessingTask, Queue]) -> None:
+    """Standalone function for processing tiles that can be pickled"""
+    task, write_queue = task_and_queue
+    
+    try:
+        # Reconstruct MBTilesSource objects
+        sources = [
+            MBTilesSource(
+                path=path,
+                encoding=EncodingType(encoding),
+                height_adjustment=height_adj,
+                base_val=base_val,
+                interval=interval,
+                mask_values=mask_vals
+            )
+            for path, encoding, height_adj, base_val, interval, mask_vals in zip(
+                task.sources,
+                task.source_encodings,
+                task.height_adjustments,
+                task.base_vals,
+                task.intervals,
+                task.mask_values
+            )
+        ]
+        
+        # Create merger instance
+        merger = TerrainRGBMerger(
+            sources=sources,
+            output_path=task.output_path,
+            output_encoding=EncodingType(task.output_encoding),
+            resampling=task.resampling,
+            processes=1,
+            default_tile_size=512,
+            output_image_format=ImageFormat(task.output_image_format),
+            output_quantized_alpha=task.output_quantized_alpha,
+            min_zoom=task.tile.z,
+            max_zoom=task.tile.z,
+            bounds=None
+        )
+        
+        # Process the tile
+        source_conns = {
+            source.path: sqlite3.connect(source.path)
+            for source in sources
+        }
+        
+        merger.process_tile(task.tile, source_conns, write_queue)
+        
+        # Clean up connections
+        for conn in source_conns.values():
+            conn.close()
+            
+    except Exception as e:
+        logging.error(f"Error processing tile {task.tile}: {e}")
+        raise
 
 class TerrainRGBMerger:
     """
@@ -433,13 +507,7 @@ class TerrainRGBMerger:
             logging.error(f"Error processing tile {args.tile}: {e}")
 
     def process_zoom_level(self, zoom: int):
-        """Process all tiles for a given zoom level in parallel
-        
-        Parameters
-        ----------
-        zoom : int
-            The zoom level to process
-        """
+        """Process all tiles for a given zoom level in parallel"""
         print(f"process_zoom_level called with zoom: {zoom}")
         self.logger.info(f"Processing zoom level {zoom}")
         
@@ -447,33 +515,38 @@ class TerrainRGBMerger:
         tiles = self._get_tiles_for_zoom(zoom)
         self.logger.info(f"Found {len(tiles)} tiles to process")
         
-        # Prepare arguments for parallel processing
-        process_args = [
-            ProcessTileArgs(
+        # Create processing tasks with all necessary data
+        processing_tasks = [
+            TileProcessingTask(
                 tile=tile,
-                sources=self.sources,
+                sources=[source.path for source in self.sources],
                 output_path=self.output_path,
-                output_encoding=self.output_encoding,
+                output_encoding=self.output_encoding.value,
                 resampling=self.resampling,
-                output_image_format=self.output_image_format,
+                output_image_format=self.output_image_format.value,
                 output_quantized_alpha=self.output_quantized_alpha,
+                source_encodings=[source.encoding.value for source in self.sources],
+                height_adjustments=[source.height_adjustment for source in self.sources],
+                base_vals=[source.base_val for source in self.sources],
+                intervals=[source.interval for source in self.sources],
+                mask_values=[source.mask_values for source in self.sources]
             )
             for tile in tiles
         ]
         
-        # Create args with queue pairs
-        args_with_queue = [(arg, self.write_queue) for arg in process_args]
+        # Pair tasks with queue
+        tasks_with_queue = [(task, self.write_queue) for task in processing_tasks]
         
-        # Create the writer process
-        writer_process = multiprocessing.Process(target=self._writer_process, args=(self.write_queue,))
+        # Create writer process
+        writer_process = Process(target=self._writer_process, args=(self.write_queue,))
         writer_process.start()
-
-        # Process tiles in parallel using the static method
-        with multiprocessing.Pool(self.processes) as pool:
-            for _ in pool.imap_unordered(self._process_tile_with_queue, args_with_queue, chunksize=1):
-                pass
         
-        # Put the None value to stop the writer and wait for queue to empty
+        # Process tiles in parallel
+        with Pool(self.processes) as pool:
+            for _ in pool.imap_unordered(process_tile_task, tasks_with_queue, chunksize=1):
+                pass
+                
+        # Clean up
         self.write_queue.put(None)
         self.write_queue.join()
         writer_process.join()
