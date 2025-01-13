@@ -352,6 +352,7 @@ class TerrainRGBMerger:
                return
             
             # Encode using output format and save
+            print(f"RGB data before encoding shape: {merged_elevation.shape}")
             rgb_data = ImageEncoder.data_to_rgb(
                 merged_elevation,
                 self.output_encoding,
@@ -566,6 +567,7 @@ def process_tile_task(task_tuple: tuple) -> None:
             return
         
         # Encode using output format
+        print(f"RGB data before encoding shape: {merged_elevation.shape}")
         rgb_data = ImageEncoder.data_to_rgb(
             merged_elevation,
             output_encoding,
