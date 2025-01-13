@@ -110,22 +110,6 @@ class TerrainRGBMerger:
         self.min_zoom = min_zoom
         self.max_zoom = max_zoom
         self.bounds = bounds
-
-    @contextmanager
-    def _db_connection(self, db_path: Path):
-        """Context manager for database connections
-        
-        Parameters
-        ----------
-        db_path : Path
-           The path to the database
-        """
-        print(f"_db_connection called with db_path: {db_path}")
-        conn = sqlite3.connect(db_path)
-        try:
-            yield conn
-        finally:
-            conn.close()
     
     def _decode_tile(self, tile_data: bytes, tile: mercantile.Tile, encoding: EncodingType, source: MBTilesSource) -> Tuple[Optional[np.ndarray], dict]:
         """
@@ -406,7 +390,7 @@ class TerrainRGBMerger:
         else:
             # Get tiles from the LAST source
             source = self.sources[-1]
-            with self._db_connection(source.path) as conn:
+            with MBTilesDatabase._db_connection(source.path) as conn:
                 cursor = conn.cursor()
                 cursor.execute(
                     'SELECT DISTINCT tile_column, tile_row FROM tiles WHERE zoom_level = ?',
@@ -449,12 +433,12 @@ class TerrainRGBMerger:
                 output_quantized_alpha=args.output_quantized_alpha,
                 min_zoom = args.tile.z,
                 max_zoom = args.tile.z,
-                bounds = None # Do not use the bounding box in this method
+                bounds = None
             )
             merger.process_tile(args.tile)
         except Exception as e:
             logging.error(f"Error processing tile {args.tile}: {e}")
-
+            
     def process_zoom_level(self, zoom: int):
         """Process all tiles for a given zoom level in parallel
         
@@ -500,7 +484,7 @@ class TerrainRGBMerger:
         print("_get_max_zoom_level called")
         max_zoom = 0
         source = self.sources[-1]
-        with self._db_connection(source.path) as conn:
+        with MBTilesDatabase._db_connection(source.path) as conn:
             cursor = conn.cursor()
             cursor.execute("SELECT MAX(zoom_level) FROM tiles")
             result = cursor.fetchone()

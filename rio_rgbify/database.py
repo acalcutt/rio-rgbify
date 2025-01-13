@@ -105,8 +105,9 @@ class MBTilesDatabase:
         (z, x, tiley, tileDataId),
       )
 
+    @staticmethod
     @contextmanager
-    def _db_connection(self, db_path: Path):
+    def _db_connection(db_path: Path):
         """Context manager for database connections"""
         print(f"_db_connection called with db_path: {db_path}")
         conn = sqlite3.connect(db_path)
