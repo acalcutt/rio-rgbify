@@ -109,8 +109,9 @@ The `merge` command makes use of a json configuration file which should be passe
       "path": "/path/to/base_terrain.mbtiles",
       "encoding": "mapbox",
       "height_adjustment": 0.0,
-       "base_val": -10000,
-       "interval": 0.1
+      "base_val": -10000,
+      "interval": 0.1,
+      "mask_values": [-1,0]
     },
     {
       "path": "/path/to/secondary_terrain.mbtiles",
@@ -119,7 +120,7 @@ The `merge` command makes use of a json configuration file which should be passe
     }
   ],
   "output_path": "/path/to/output.mbtiles",
-   "output_encoding": "mapbox",
+  "output_encoding": "mapbox",
   "output_format": "webp",
   "resampling": "bilinear",
   "output_quantized_alpha": true,
@@ -138,6 +139,7 @@ The `merge` command makes use of a json configuration file which should be passe
     *   `height_adjustment` (Optional, Default: `0.0`): A floating-point value (in meters) to adjust the elevation of that particular input. Positive values raise the elevation, and negative values lower the elevation.
     *   `base_val` (Optional, Default: `-10000`): A floating-point value which will be the base value for mapbox encoded tiles, in meters.
     *   `interval` (Optional, Default: `0.1`): A floating-point value that represents the vertical distance between each level of encoded height.
+    * `mask_values` (Optional, Default `[0.0, -1.0]`): A list of numbers representing the elevation values to mask.
 *   `output_path` (Optional, Default: `"output.mbtiles"`): The output path for the merged MBTiles file.
 *   `output_encoding` (Optional, Default: `"mapbox"`): The output encoding to use (`"mapbox"` or `"terrarium"`).
 *   `output_format` (Optional, Default: `"png"`): The output image format (`"png"` or `"webp"`).

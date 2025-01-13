@@ -39,7 +39,7 @@ class ImageEncoder:
         Returns
         --------
         ndarray: rgb data
-            a uint8 (3 x rows x cols) ndarray with the
+            a uint8 (3 x rows x cols) or (4 x rows x cols) ndarray with the
             data encoded
         """
         data = data.astype(np.float64)
@@ -57,7 +57,7 @@ class ImageEncoder:
         rows, cols = data.shape
         if quantized_alpha and encoding == "terrarium":
           rgb = np.zeros((4, rows, cols), dtype=np.uint8)
-          mapping_table = Encoder._generate_mapping_table()
+          mapping_table = ImageEncoder._generate_mapping_table()
           
           for row_index, row in enumerate(data):
             for col_index, value in enumerate(row):
@@ -67,16 +67,17 @@ class ImageEncoder:
           rgb[0] = data // 256
           rgb[1] = np.floor(data % 256)
           rgb[2] = np.floor((data - np.floor(data)) * 256)
+          return rgb
         else:
           rgb = np.zeros((3, rows, cols), dtype=np.uint8)
           if(encoding == "terrarium"):
-              rgb[0] = data // 256
-              rgb[1] = np.floor(data % 256)
-              rgb[2] = np.floor((data - np.floor(data)) * 256)
+            rgb[0] = data // 256
+            rgb[1] = np.floor(data % 256)
+            rgb[2] = np.floor((data - np.floor(data)) * 256)
           else:
-              rgb[0] = ((((data // 256) // 256) / 256) - (((data // 256) // 256) // 256)) * 256
-              rgb[1] = (((data // 256) / 256) - ((data // 256) // 256)) * 256
-              rgb[2] = ((data / 256) - (data // 256)) * 256
+            rgb[0] = ((((data // 256) // 256) / 256) - (((data // 256) // 256) // 256)) * 256
+            rgb[1] = (((data // 256) / 256) - ((data // 256) // 256)) * 256
+            rgb[2] = ((data / 256) - (data // 256)) * 256
 
         return rgb
     
@@ -92,11 +93,13 @@ class ImageEncoder:
             return base + (((data[0] * 256 * 256) + (data[1] * 256) + data[2]) * interval)
 
     @staticmethod
-    def _mask_elevation(elevation: np.ndarray) -> np.ndarray:
+    def _mask_elevation(elevation: np.ndarray, mask_values: list = [0.0]) -> np.ndarray:
         """
-        Mask 0 and -1 elevation values with NaN
+        Mask specific elevation values with NaN
         """
-        mask = np.logical_or(elevation == 0, elevation == -1)
+        mask = np.zeros_like(elevation, dtype=bool)
+        for mask_value in mask_values:
+          mask = np.logical_or(mask, elevation == mask_value)
         return np.where(mask, np.nan, elevation)
     
 
@@ -131,13 +134,13 @@ class ImageEncoder:
     @staticmethod
     def encode_as_webp(data, profile=None, affine=None):
         """
-        Uses BytesIO + PIL to encode a (3, height, width)
+        Uses BytesIO + PIL to encode a (3 or 4, height, width)
         array into a webp bytearray.
 
         Parameters
         -----------
         data: ndarray
-            (3 x height x width) uint8 RGB array
+            (3 or 4 x height x width) uint8 RGB array
         profile: None
             ignored
         affine: None
@@ -149,22 +152,28 @@ class ImageEncoder:
             webp-encoded bytearray of the provided input data
         """
         with BytesIO() as f:
+          if data.ndim == 3:
             im = Image.fromarray(np.moveaxis(data, 0, 3))
-            im.save(f, format="webp", lossless=True)
+          elif data.ndim == 4:
+            im = Image.fromarray(np.moveaxis(data, 0, 3), mode = 'RGBA')
+          else:
+            raise ValueError("unexpected number of image dimensions")
 
-            return f.getvalue()
+          im.save(f, format="webp", lossless=True)
+
+          return f.getvalue()
 
 
     @staticmethod
     def encode_as_png(data, profile, dst_transform):
         """
-        Uses rasterio's virtual file system to encode a (3, height, width)
+        Uses rasterio's virtual file system to encode a (3 or 4, height, width)
         array as a png-encoded bytearray.
 
         Parameters
         -----------
         data: ndarray
-            (3 x height x width) uint8 RGB array
+            (3 or 4 x height x width) uint8 RGB array
         profile: dictionary
             dictionary of kwargs for png writing
         affine: Affine
@@ -176,14 +185,17 @@ class ImageEncoder:
             png-encoded bytearray of the provided input data
         """
         profile["affine"] = dst_transform
-
         with rasterio.open("/vsimem/tileimg", "w", **profile) as dst:
-            dst.write(data)
-
+            if data.ndim == 3:
+                dst.write(data)
+            elif data.ndim == 4:
+                dst.write(np.moveaxis(data, 0, -1)) #Correct dimensions and preserve alpha
+            else:
+                raise ValueError(f"Unexpected number of dimensions {data.ndim}")
         contents = bytearray(virtual_file_to_buffer("/vsimem/tileimg"))
 
         return contents
-    
+
     @staticmethod
     def save_rgb_to_bytes(rgb_data: np.ndarray, output_image_format: "ImageFormat", default_tile_size: int = 512) -> bytes:
         """
@@ -192,7 +204,7 @@ class ImageEncoder:
         Parameters
         ----------
         rgb_data: np.ndarray
-           a (3 x height x width) ndarray with the RGB values
+           a (3 x height x width) or (4 x height x width) ndarray with the RGB values
         output_image_format: ImageFormat
             the format that the array should be encoded to
         default_tile_size: int
@@ -206,15 +218,17 @@ class ImageEncoder:
         image_bytes = BytesIO()
         if rgb_data.size > 0:
             if rgb_data.ndim == 3:
-              image = Image.fromarray(np.moveaxis(rgb_data, 0, -1), 'RGB')
+                image = Image.fromarray(np.moveaxis(rgb_data, 0, -1), 'RGB')
+            elif rgb_data.ndim == 4:
+                image = Image.fromarray(np.moveaxis(rgb_data, 0, -1), 'RGBA') # Add RGBA mode for 4 channel images
             else:
-              tile_size = default_tile_size
-              image = Image.fromarray(np.moveaxis(np.zeros((3,tile_size,tile_size),dtype=np.uint8), 0, -1), 'RGB')
-              
+                tile_size = default_tile_size
+                image = Image.fromarray(np.moveaxis(np.zeros((3,tile_size,tile_size),dtype=np.uint8), 0, -1), 'RGB')
+            
             if output_image_format == ImageFormat.PNG:
                 image.save(image_bytes, format='PNG')
             elif output_image_format == ImageFormat.WEBP:
-                image.save(image_bytes, format='WEBP')
+                image.save(image_bytes, format='WEBP', lossless=True)
             image_bytes = image_bytes.getvalue()
 
         return image_bytes

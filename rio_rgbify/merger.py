@@ -24,9 +24,10 @@ class MBTilesSource:
     """Configuration for an MBTiles source file"""
     path: Path
     encoding: EncodingType
-    height_adjustment: float = 0.0
-    base_val: float = -10000
-    interval: float = 0.1
+    height_adjustment: float = 0.0 # Added height adjustment
+    base_val: float = -10000 # Add base val, with default of -10000 for mapbox
+    interval: float = 0.1 # Add interval with default of 0.1 for mapbox
+    mask_values: list = [0.0] # Add list of mask values
 
 @dataclass
 class ProcessTileArgs:
@@ -168,11 +169,11 @@ class TerrainRGBMerger:
                 if encoding == EncodingType.MAPBOX:
                    elevation = ImageEncoder._decode(rgb, source.base_val, source.interval, encoding.value)
                 elif encoding == EncodingType.TERRARIUM:
-                   elevation = ImageEncoder._decode(rgb, 0, 0, encoding.value) 
+                   elevation = ImageEncoder._decode(rgb, 0, 1, encoding.value)
                 else:
                   raise ValueError(f"Invalid encoding type: {encoding}")
 
-                elevation = ImageEncoder._mask_elevation(elevation)
+                elevation = ImageEncoder._mask_elevation(elevation, source.mask_values)
                 
                 bounds = mercantile.bounds(tile)
                 meta = dataset.meta.copy()
@@ -264,23 +265,12 @@ class TerrainRGBMerger:
         if not any(tile_datas):
           return None
         
-        bounds = mercantile.bounds(target_tile)
-        
-        # Use the tile size of the first tile, or the default if no primary tile
-        tile_size = self.default_tile_size
-        if tile_datas[0] is not None and 'width' in tile_datas[0].meta and 'height' in tile_datas[0].meta:
-            tile_size = tile_datas[0].meta['width']
-            
-        target_transform = rasterio.transform.from_bounds(
-          bounds.west, bounds.south, bounds.east, bounds.north,
-          tile_size, tile_size
-          )
         
         result = None
 
         for i, tile_data in enumerate(tile_datas):
             if tile_data is not None:
-                resampled_data = self._resample_if_needed(tile_data, target_tile, target_transform, tile_size)
+                resampled_data = self._resample_if_needed(tile_data, target_tile)
                 
                 #Apply the height adjustment
                 resampled_data += self.sources[i].height_adjustment
@@ -295,9 +285,8 @@ class TerrainRGBMerger:
                       else:
                         result[mask] = resampled_data[mask][:3] # take only the first 3 channels
         return result
-            
 
-    def _resample_if_needed(self, tile_data: TileData, target_tile: mercantile.Tile, target_transform, tile_size) -> np.ndarray:
+    def _resample_if_needed(self, tile_data: TileData, target_tile: mercantile.Tile) -> np.ndarray:
         """Resample tile data if source zoom differs from target
         
         Parameters
@@ -306,10 +295,6 @@ class TerrainRGBMerger:
             The tile data to resample
         target_tile : mercantile.Tile
             The mercantile tile object for the resampled data
-        target_transform
-            The transform for the target tile
-        tile_size
-            The size of the tile in pixels.
 
         Returns
         -------
@@ -317,15 +302,17 @@ class TerrainRGBMerger:
             The resampled elevation array.
         """
         #print(f"_resample_if_needed called with tile_data: {tile_data}, target_tile: {target_tile}")
-        if tile_data.source_zoom != target_tile.z:
-
+        if tile_data.source_zoom == target_tile.z:
+           if tile_data.data.ndim == 3:
+            return tile_data.data[0]
+           else:
+             return tile_data.data
+        else:
           source_tile = mercantile.Tile(x=target_tile.x // (2**(target_tile.z - tile_data.source_zoom)),
                                         y=target_tile.y // (2**(target_tile.z - tile_data.source_zoom)),
                                         z=tile_data.source_zoom
                                         )
           source_bounds = mercantile.bounds(source_tile)
-
-          
           
           x_offset = (target_tile.x % (2**(target_tile.z - tile_data.source_zoom)))
           y_offset = (target_tile.y % (2**(target_tile.z - tile_data.source_zoom)))
@@ -338,6 +325,9 @@ class TerrainRGBMerger:
           sub_region_south = source_bounds.south + (y_offset * sub_region_height)
           sub_region_east = sub_region_west + sub_region_width
           sub_region_north = sub_region_south + sub_region_height
+          tile_size = self.default_tile_size
+          if tile_data.meta is not None and 'width' in tile_data.meta and 'height' in tile_data.meta:
+              tile_size = tile_data.meta['width']
 
           sub_region_transform = rasterio.transform.from_bounds(sub_region_west, sub_region_south, sub_region_east, sub_region_north, tile_size, tile_size)
           
@@ -358,10 +348,6 @@ class TerrainRGBMerger:
                   return dst_data[0]
               else:
                   return dst_data
-        if tile_data.data.ndim == 3:
-           return tile_data.data[0]
-        else:
-           return tile_data.data
 
     def process_tile(self, tile: mercantile.Tile) -> None:
         """Process a single tile, merging data from multiple sources.
