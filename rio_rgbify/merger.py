@@ -112,32 +112,11 @@ class TerrainRGBMerger:
         self.bounds = bounds
     
     def _decode_tile(self, tile_data: bytes, tile: mercantile.Tile, encoding: EncodingType, source: MBTilesSource) -> Tuple[Optional[np.ndarray], dict]:
-        """
-        Decode tile data using specified encoding format
-
-        Parameters
-        ----------
-        tile_data : bytes
-            The raw tile data.
-        tile : mercantile.Tile
-            The mercantile tile object.
-        encoding : EncodingType
-            The encoding used for the tile.
-        source : MBTilesSource
-           The MBTiles source.
-
-        Returns
-        -------
-        Tuple[Optional[np.ndarray], dict]
-            A tuple containing the decoded elevation data and metadata, or None, None if decoding fails.
-        """
+        """Decode tile data using specified encoding format"""
         if not isinstance(tile_data, bytes) or len(tile_data) == 0:
             raise ValueError("Invalid tile data")
             
         try:
-            # Log the size of the tile data to make sure it's non-empty
-            #self.logger.debug(f"Tile data size for {tile.z}/{tile.x}/{tile.y}: {len(tile_data)} bytes")
-            
             # Convert the image to a PNG using Pillow
             image = Image.open(io.BytesIO(tile_data))
             image = image.convert('RGB')  # Force to RGB
@@ -148,31 +127,30 @@ class TerrainRGBMerger:
             with rasterio.open(image_png) as dataset:
                 # Check if we can read data properly
                 rgb = dataset.read(masked=False).astype(np.int32)
-                #self.logger.debug(f"Decoded tile RGB shape: {rgb.shape}, dtype: {rgb.dtype}")
                 
                 if rgb.ndim != 3 or rgb.shape[0] != 3:
                     self.logger.error(f"Unexpected RGB shape in tile {tile.z}/{tile.x}/{tile.y}: {rgb.shape}")
                     return None, {}
 
-                elevation = ImageEncoder._decode(rgb, source.base_val, source.interval, encoding.value) # Use the static decode method from the encoder
+                elevation = ImageEncoder._decode(rgb, source.base_val, source.interval, encoding.value)
+                console.log(elevation)
                 elevation = ImageEncoder._mask_elevation(elevation, source.mask_values)
+                console.log(elevation)
                 
                 bounds = mercantile.bounds(tile)
+                meta = dataset.meta.copy()
                 
-                meta =  {
+                meta.update({
                     'count': 1,
                     'dtype': rasterio.float32,
                     'driver': 'GTiff',
                     'crs': 'EPSG:3857',
                     'transform': rasterio.transform.from_bounds(
                         bounds.west, bounds.south, bounds.east, bounds.north,
-                        dataset.meta['width'], dataset.meta['height']
-                    ),
-                    'width': dataset.meta['width'],
-                    'height': dataset.meta['height']
-                }
+                        meta['width'], meta['height']
+                    )
+                })
                 
-                #self.logger.debug(f"Decoded elevation: min={np.nanmin(elevation)}, max={np.nanmax(elevation)}")
                 return elevation, meta
         except Exception as e:
             self.logger.error(f"Failed to decode tile data, returning None, None: {e}")

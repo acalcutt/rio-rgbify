@@ -248,9 +248,9 @@ class ImageEncoder:
         image_bytes = BytesIO()
         if rgb_data.size > 0:
             if rgb_data.ndim == 3:
-                image = Image.fromarray(np.moveaxis(rgb_data, 0, -1), 'RGB')
+              image = Image.fromarray(np.moveaxis(rgb_data, 0, -1), 'RGB')
             elif rgb_data.ndim == 4:
-                image = Image.fromarray(np.moveaxis(rgb_data, 0, -1), 'RGBA')
+              image = Image.fromarray(np.moveaxis(rgb_data, 0, -1), 'RGBA')
             else:
                 tile_size = default_tile_size
                 image = Image.fromarray(np.moveaxis(np.zeros((3,tile_size,tile_size),dtype=np.uint8), 0, -1), 'RGB')
