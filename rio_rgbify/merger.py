@@ -45,11 +45,9 @@ class TileData:
     source_zoom: int
 
 
-def process_tile_task(task_and_queue: Tuple[tuple, Queue]) -> None:
+def process_tile_task(task_tuple: tuple) -> None:
     """Standalone function for processing tiles that can be pickled"""
-    (tile, sources, output_path, output_encoding, resampling, output_image_format, output_quantized_alpha,
-        source_encodings, height_adjustments, base_vals, intervals, mask_values), write_queue = task_and_queue
-
+    tile, sources, output_path, output_encoding, resampling, output_image_format, output_quantized_alpha, source_encodings, height_adjustments, base_vals, intervals, mask_values = task_tuple
     try:
         # Reconstruct MBTilesSource objects
         sources = [
@@ -92,7 +90,7 @@ def process_tile_task(task_and_queue: Tuple[tuple, Queue]) -> None:
             for source in sources
         }
         
-        merger.process_tile(tile, source_conns, write_queue)
+        merger.process_tile(tile, source_conns, merger.write_queue)
         
         # Clean up connections
         for conn in source_conns.values():
@@ -452,8 +450,6 @@ class TerrainRGBMerger:
                         self.logger.warning(f"Skipping invalid row: {row}")
         
         return list(tiles)
-
-
     
     def _writer_process(self, write_queue: Queue):
         """Writes to the db using a shared queue"""
@@ -500,8 +496,8 @@ class TerrainRGBMerger:
         
         # Process tiles in parallel using starmap, also passing the queue to each worker
         with multiprocessing.Pool(self.processes) as pool:
-          for _ in pool.imap_unordered(process_tile_task, [(task, self.write_queue) for task in tasks], chunksize=1):
-            pass
+            for _ in pool.imap_unordered(process_tile_task, [(task, self.write_queue) for task in tasks], chunksize=1):
+                pass
 
         # Clean up
         self.write_queue.put(None)
