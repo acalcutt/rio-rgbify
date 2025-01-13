@@ -336,13 +336,7 @@ class TerrainRGBMerger:
                   return dst_data
 
     def process_tile(self, tile: mercantile.Tile) -> None:
-        """Process a single tile, merging data from multiple sources.
-        
-        Parameters
-        ----------
-        tile : mercantile.Tile
-            The tile to process.
-        """
+        """Process a single tile, merging data from multiple sources"""
         #print(f"process_tile called with tile: {tile}")
         try:
             # Extract tiles from all sources
@@ -359,8 +353,8 @@ class TerrainRGBMerger:
                 # Encode using output format and save
                 rgb_data = ImageEncoder.data_to_rgb(merged_elevation, self.output_encoding, 0.1, base_val=-10000, quantized_alpha=self.output_quantized_alpha if self.output_encoding == EncodingType.TERRARIUM else False) # Use the encoder from the encoders.py file
                 with MBTilesDatabase(self.output_path) as db:
-                    image_bytes = ImageEncoder.save_rgb_to_bytes(rgb_data, self.output_image_format, self.default_tile_size)
-                    db.insert_tile(tile = [tile.x, tile.y, tile.z], contents = image_bytes)
+                  image_bytes = ImageEncoder.save_rgb_to_bytes(rgb_data, self.output_image_format, self.default_tile_size)
+                  db.insert_tile(tile = [tile.x, tile.y, tile.z], contents = image_bytes)
                 self.logger.info(f"Successfully processed tile {tile.z}/{tile.x}/{tile.y}")
         except Exception as e:
             self.logger.error(f"Error processing tile {tile.z}/{tile.x}/{tile.y}: {e}")
