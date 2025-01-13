@@ -261,14 +261,19 @@ class ImageEncoder:
                   image = Image.fromarray(np.moveaxis(np.zeros((3,tile_size,tile_size),dtype=np.uint8), 0, -1), 'RGB')
 
                 print(f"image created with shape: {np.array(image).shape}")
-
+                
                 if output_image_format == ImageFormat.PNG:
-                    image.save(image_bytes, format='PNG')
+                  image.save(image_bytes, format='PNG')
                 elif output_image_format == ImageFormat.WEBP:
                     image.save(image_bytes, format='WEBP', lossless=True)
+                
+                
+                
                 image_bytes = image_bytes.getvalue()
                 print(f"image_bytes size {len(image_bytes)}")
             except Exception as e:
                 logging.error(f"Failed to encode image: {e}")
+        else:
+            print("rgb_data size is 0")
 
         return image_bytes
