@@ -10,7 +10,7 @@ from pathlib import Path
 import logging
 from enum import Enum
 from dataclasses import dataclass, field
-from typing import Optional, Tuple, List
+from typing import Optional, Tuple, List, Dict
 from contextlib import contextmanager
 from rio_rgbify.database import MBTilesDatabase
 from rio_rgbify.image import ImageFormat, ImageEncoder
@@ -34,6 +34,7 @@ class MBTilesSource:
         if not self.path.exists():
             raise ValueError(f"Source file does not exist: {self.path}")
 
+
 @dataclass
 class ProcessTileArgs:
     """Arguments for parallel tile processing"""
@@ -44,6 +45,7 @@ class ProcessTileArgs:
     resampling: int
     output_image_format: ImageFormat
     output_quantized_alpha: bool
+
 
 @dataclass
 class TileData:
@@ -181,7 +183,7 @@ class TerrainRGBMerger:
             self.logger.error(f"Failed to decode tile data, returning None, None: {e}")
             return None, {}
 
-    def _extract_tile(self, source: MBTilesSource, zoom: int, x: int, y: int) -> Optional[TileData]:
+    def _extract_tile(self, source: MBTilesSource, zoom: int, x: int, y: int, source_conns: Dict[Path, sqlite3.Connection]) -> Optional[TileData]:
         """Extract and decode a tile, with fallback to parent tiles
         
         Parameters
@@ -203,28 +205,33 @@ class TerrainRGBMerger:
         #print(f"_extract_tile called with source: {source}, zoom: {zoom}, x: {x}, y: {y}")
         current_zoom = zoom
         current_x, current_y = x, y
-        mbtiles_db = MBTilesDatabase(source.path)
-
+        
         while current_zoom >= 0:
-            tile_data = mbtiles_db.get_tile_data(current_zoom, current_x, current_y)
+          conn = source_conns[source.path] # get the database connection from the dictionary
+          cursor = conn.cursor()
+          cursor.execute(
+                "SELECT tile_data FROM tiles WHERE zoom_level=? AND tile_column=? AND tile_row=?",
+                (current_zoom, current_x, current_y)
+            )
+          result = cursor.fetchone()
             
-            if tile_data is not None:
-                try:
-                    data_meta = self._decode_tile(tile_data, mercantile.Tile(current_x, current_y, current_zoom), source.encoding, source) #pass in source
-                    #self.logger.debug(f"decoded data for {current_zoom}/{current_x}/{current_y}: data is {data_meta[0] is None}, meta is {data_meta[1] is None}")
-                    if data_meta[0] is None:
-                        return None
-                    if data_meta[0].size == 0:
-                       return None
-                    return TileData(data_meta[0], data_meta[1], current_zoom)
-                except Exception as e:
-                    self.logger.error(f"Failed to decode tile {current_zoom}/{current_x}/{current_y}: {e}")
+          if result is not None:
+              try:
+                  data_meta = self._decode_tile(result[0], mercantile.Tile(current_x, current_y, current_zoom), source.encoding, source) #pass in source
+                  #self.logger.debug(f"decoded data for {current_zoom}/{current_x}/{current_y}: data is {data_meta[0] is None}, meta is {data_meta[1] is None}")
+                  if data_meta[0] is None:
+                      return None
+                  if data_meta[0].size == 0:
                     return None
+                  return TileData(data_meta[0], data_meta[1], current_zoom)
+              except Exception as e:
+                  self.logger.error(f"Failed to decode tile {current_zoom}/{current_x}/{current_y}: {e}")
+                  return None
             
-            if current_zoom > 0:
+          if current_zoom > 0:
                 current_x //= 2
                 current_y //= 2
-            current_zoom -= 1
+          current_zoom -= 1
         
         return None
 
@@ -328,12 +335,12 @@ class TerrainRGBMerger:
                     else:
                         return dst_data
 
-    def process_tile(self, tile: mercantile.Tile, write_queue: Queue) -> None:
+    def process_tile(self, tile: mercantile.Tile, db: MBTilesDatabase, source_conns: Dict[Path, sqlite3.Connection]) -> None:
         """Process a single tile, merging data from multiple sources"""
         #print(f"process_tile called with tile: {tile}")
         try:
             # Extract tiles from all sources
-            tile_datas = [self._extract_tile(source, tile.z, tile.x, tile.y) for source in self.sources]
+            tile_datas = [self._extract_tile(source, tile.z, tile.x, tile.y, source_conns) for source in self.sources]
 
             if not any(tile_datas):
                 self.logger.debug(f"No data found for tile {tile.z}/{tile.x}/{tile.y}")
@@ -347,7 +354,7 @@ class TerrainRGBMerger:
                 rgb_data = ImageEncoder.data_to_rgb(merged_elevation, self.output_encoding, 0.1, base_val=-10000, quantized_alpha=self.output_quantized_alpha if self.output_encoding == EncodingType.TERRARIUM else False) # Use the encoder from the encoders.py file
                 image_bytes = ImageEncoder.save_rgb_to_bytes(rgb_data, self.output_image_format, self.default_tile_size)
                 
-                write_queue.put((tile, image_bytes))
+                self.write_queue.put((tile, image_bytes)) # write to the queue
                 self.logger.info(f"Successfully processed tile {tile.z}/{tile.x}/{tile.y}")
         except Exception as e:
             self.logger.error(f"Error processing tile {tile.z}/{tile.x}/{tile.y}: {e}")
@@ -393,7 +400,7 @@ class TerrainRGBMerger:
         return list(tiles)
 
     @staticmethod
-    def _process_tile_wrapper(args: ProcessTileArgs) -> None:
+    def _process_tile_wrapper(args: ProcessTileArgs, write_queue: Queue) -> None:
         """Static wrapper method for parallel tile processing
         
         Parameters
@@ -416,7 +423,13 @@ class TerrainRGBMerger:
                 max_zoom = args.tile.z,
                 bounds = None
             )
-            merger.process_tile(args.tile, merger.write_queue) # Pass in the shared queue from the main process
+            source_conns = {}
+            for source in args.sources:
+              source_conns[source.path] = sqlite3.connect(source.path) # create a connection for each source.
+            with MBTilesDatabase(args.output_path) as db:
+              merger.process_tile(args.tile, db, source_conns) # Pass the connection to process tile
+            for conn in source_conns.values():
+              conn.close() #close the source connections when we are done.
         except Exception as e:
             logging.error(f"Error processing tile {args.tile}: {e}")
     
@@ -466,7 +479,7 @@ class TerrainRGBMerger:
 
         # Process tiles in parallel
         with multiprocessing.Pool(self.processes) as pool:
-            for _ in pool.imap_unordered(self._process_tile_wrapper, process_args):
+            for _ in pool.imap_unordered(self._process_tile_wrapper, process_args, [self.write_queue for _ in process_args]):
                 pass
         
         # Put the None value to stop the writer and wait for queue to empty
