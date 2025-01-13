@@ -249,28 +249,47 @@ class ImageEncoder:
             bytes for a image encoded to the given output format
         """
         print(f"save_rgb_to_bytes called with rgb data shape {rgb_data.shape}")
-        image_bytes = bytearray() # changed from BytesIO to bytearray
+        image_bytes = bytearray()
         if rgb_data.size > 0:
-            try:
-                if rgb_data.ndim == 3:
-                    image = Image.fromarray(np.moveaxis(rgb_data, 0, -1).astype(np.uint8), 'RGB')
-                elif rgb_data.ndim == 4:
-                    image = Image.fromarray(np.moveaxis(rgb_data, 0, -1).astype(np.uint8), 'RGBA')
-                else:
-                  tile_size = default_tile_size
-                  image = Image.fromarray(np.moveaxis(np.zeros((3,tile_size,tile_size),dtype=np.uint8), 0, -1), 'RGB')
+          try:
+            if rgb_data.ndim == 3:
+              height, width = rgb_data.shape[1], rgb_data.shape[2]
+              print(f"image created with shape: ({height}, {width}, 3)")
+              if output_image_format == ImageFormat.PNG:
+                  for h in range(height):
+                      for w in range(width):
+                          r, g, b = rgb_data[0][h][w], rgb_data[1][h][w], rgb_data[2][h][w]
+                          image_bytes += bytes([r,g,b])
+              elif output_image_format == ImageFormat.WEBP:
+                  im = Image.fromarray(np.moveaxis(rgb_data, 0, 3).astype(np.uint8), 'RGB')
+                  with BytesIO() as f:
+                    im.save(f, format="webp", lossless=True)
+                    image_bytes = bytearray(f.getvalue())
 
-                print(f"image created with shape: {np.array(image).shape}")
-                
+            elif rgb_data.ndim == 4:
+              height, width = rgb_data.shape[1], rgb_data.shape[2]
+              print(f"image created with shape: ({height}, {width}, 4)")
+              if output_image_format == ImageFormat.PNG:
+                  for h in range(height):
+                      for w in range(width):
+                          r, g, b, a = rgb_data[0][h][w], rgb_data[1][h][w], rgb_data[2][h][w], rgb_data[3][h][w]
+                          image_bytes += bytes([r,g,b,a])
+              elif output_image_format == ImageFormat.WEBP:
+                  im = Image.fromarray(np.moveaxis(rgb_data, 0, 3).astype(np.uint8), 'RGBA')
+                  with BytesIO() as f:
+                    im.save(f, format="webp", lossless=True)
+                    image_bytes = bytearray(f.getvalue())
+            else:
+                tile_size = default_tile_size
+                image = Image.fromarray(np.moveaxis(np.zeros((3,tile_size,tile_size),dtype=np.uint8), 0, -1), 'RGB')
                 if output_image_format == ImageFormat.PNG:
                     image.save(image_bytes, format='PNG')
                 elif output_image_format == ImageFormat.WEBP:
                     image.save(image_bytes, format='WEBP', lossless=True)
-            
-                print(f"image_bytes size {len(image_bytes)}")
-                
-            except Exception as e:
-                logging.error(f"Failed to encode image: {e}")
+                image_bytes = bytearray(image_bytes.getvalue())
+            print(f"image_bytes size {len(image_bytes)}")
+          except Exception as e:
+              logging.error(f"Failed to encode image: {e}")
         else:
             print("rgb_data size is 0")
-        return bytes(image_bytes) # return as bytestring
+        return bytes(image_bytes)
