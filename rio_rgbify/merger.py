@@ -425,9 +425,12 @@ class TerrainRGBMerger:
     def process_zoom_level(self, zoom: int):
         """Process all tiles for a given zoom level in parallel"""
         self.logger.info(f"Processing zoom level {zoom}")
+        source_conns = {}
+        for s in self.sources:
+            source_conns[s.path] = sqlite3.connect(s.path)
 
         # Get list of tiles to process
-        tiles = self._get_tiles_for_zoom(zoom)
+        tiles = self._get_tiles_for_zoom(zoom, source_conns)
         self.logger.info(f"Found {len(tiles)} tiles to process")
 
         # Create task tuples with all necessary data
@@ -453,6 +456,9 @@ class TerrainRGBMerger:
                 chunksize=1
             ):
                 pass
+        for conn in source_conns.values():
+            if conn:
+                conn.close()
 
 
     def _get_tiles_for_zoom(self, zoom: int) -> List[mercantile.Tile]:
@@ -568,7 +574,7 @@ def process_tile_task(task_tuple: tuple) -> None:
     finally:
         # Clean up connections
         for conn in source_conns.values():
-            if conn:
+           if conn:
                 conn.close()
 
 def _tile_range(start: mercantile.Tile, stop: mercantile.Tile):
