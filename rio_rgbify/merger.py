@@ -27,7 +27,11 @@ class MBTilesSource:
     height_adjustment: float = 0.0 # Added height adjustment
     base_val: float = -10000 # Add base val, with default of -10000 for mapbox
     interval: float = 0.1 # Add interval with default of 0.1 for mapbox
-    mask_values: list = [0.0] # Add list of mask values
+    mask_values: list = [0.0]
+
+    def __post_init__(self):
+        if not self.path.exists():
+            raise ValueError(f"Source file does not exist: {self.path}")
 
 @dataclass
 class ProcessTileArgs:
@@ -144,34 +148,34 @@ class TerrainRGBMerger:
             A tuple containing the decoded elevation data and metadata, or None, None if decoding fails.
         """
         if not isinstance(tile_data, bytes) or len(tile_data) == 0:
-            raise ValueError("Invalid tile data")
+            self.logger.debug(f"Invalid tile data for tile {tile.z}/{tile.x}/{tile.y}")
+            return None, {}
             
         try:
-            # Log the size of the tile data to make sure it's non-empty
-            #self.logger.debug(f"Tile data size for {tile.z}/{tile.x}/{tile.y}: {len(tile_data)} bytes")
-            
-            # Convert the image to a PNG using Pillow
             image = Image.open(io.BytesIO(tile_data))
-            image = image.convert('RGB')  # Force to RGB
+            image = image.convert('RGB')
             image_png = io.BytesIO()
             image.save(image_png, format='PNG', bits=8)
             image_png.seek(0)
             
             with rasterio.open(image_png) as dataset:
-                # Check if we can read data properly
                 rgb = dataset.read(masked=False).astype(np.int32)
-                #self.logger.debug(f"Decoded tile RGB shape: {rgb.shape}, dtype: {rgb.dtype}")
                 
                 if rgb.ndim != 3 or rgb.shape[0] != 3:
-                    self.logger.error(f"Unexpected RGB shape in tile {tile.z}/{tile.x}/{tile.y}: {rgb.shape}")
+                    self.logger.debug(f"Invalid RGB shape in tile {tile.z}/{tile.x}/{tile.y}: {rgb.shape}")
+                    return None, {}
+
+                # Check RGB bounds before decoding
+                if np.any(rgb < 0) or np.any(rgb > 255):
+                    self.logger.debug(f"RGB values out of bounds in tile {tile.z}/{tile.x}/{tile.y}")
                     return None, {}
 
                 if encoding == EncodingType.MAPBOX:
-                   elevation = ImageEncoder._decode(rgb, source.base_val, source.interval, encoding.value)
+                    elevation = ImageEncoder._decode(rgb, source.base_val, source.interval, encoding.value)
                 elif encoding == EncodingType.TERRARIUM:
-                   elevation = ImageEncoder._decode(rgb, 0, 1, encoding.value)
+                    elevation = ImageEncoder._decode(rgb, 0, 1, encoding.value)
                 else:
-                  raise ValueError(f"Invalid encoding type: {encoding}")
+                    raise ValueError(f"Invalid encoding type: {encoding}")
 
                 elevation = ImageEncoder._mask_elevation(elevation, source.mask_values)
                 
@@ -188,10 +192,9 @@ class TerrainRGBMerger:
                     )
                 })
                 
-                #self.logger.debug(f"Decoded elevation: min={np.nanmin(elevation)}, max={np.nanmax(elevation)}")
                 return elevation, meta
         except Exception as e:
-            self.logger.error(f"Failed to decode tile data, returning None, None: {e}")
+            self.logger.error(f"Failed to decode tile {tile.z}/{tile.x}/{tile.y}: {str(e)}")
             return None, {}
 
     def _extract_tile(self, source: MBTilesSource, zoom: int, x: int, y: int) -> Optional[TileData]:
@@ -213,7 +216,6 @@ class TerrainRGBMerger:
         Optional[TileData]
             TileData object or None if it cannot be extracted.
         """
-        #print(f"_extract_tile called with source: {source}, zoom: {zoom}, x: {x}, y: {y}")
         current_zoom = zoom
         current_x, current_y = x, y
 
@@ -228,21 +230,25 @@ class TerrainRGBMerger:
                 
                 if result is not None:
                     try:
-                        data_meta = self._decode_tile(result[0], mercantile.Tile(current_x, current_y, current_zoom), source.encoding, source) #pass in source
-                        #self.logger.debug(f"decoded data for {current_zoom}/{current_x}/{current_y}: data is {data_meta[0] is None}, meta is {data_meta[1] is None}")
-                        if data_meta[0] is None:
+                        data_meta = self._decode_tile(
+                            result[0],
+                            mercantile.Tile(current_x, current_y, current_zoom),
+                            source.encoding,
+                            source
+                        )
+                        if data_meta[0] is None or data_meta[0].size == 0:
                             return None
-                        if data_meta[0].size == 0:
-                          return None
+                        # Apply height adjustment here, before resampling
+                        data_meta[0] += source.height_adjustment
                         return TileData(data_meta[0], data_meta[1], current_zoom)
                     except Exception as e:
-                        self.logger.error(f"Failed to decode tile {current_zoom}/{current_x}/{current_y}: {e}")
+                        self.logger.error(f"Failed to decode tile {current_zoom}/{current_x}/{current_y}: {str(e)}")
                         return None
-            
-            if current_zoom > 0:
-                current_x //= 2
-                current_y //= 2
-            current_zoom -= 1
+                
+                if current_zoom > 0:
+                    current_x //= 2
+                    current_y //= 2
+                current_zoom -= 1
         
         return None
 
@@ -261,29 +267,26 @@ class TerrainRGBMerger:
         Optional[np.ndarray]
             The merged elevation array, or None if no valid tiles to merge.
         """
-        #print(f"_merge_tiles called with tile_datas: {tile_datas}, target_tile: {target_tile}")
         if not any(tile_datas):
-          return None
-        
+            return None
         
         result = None
-
         for i, tile_data in enumerate(tile_datas):
             if tile_data is not None:
                 resampled_data = self._resample_if_needed(tile_data, target_tile)
                 
-                #Apply the height adjustment
-                resampled_data += self.sources[i].height_adjustment
-
                 if result is None:
                     result = resampled_data
                 else:
                     mask = ~np.isnan(resampled_data)
                     if np.any(mask):
-                      if resampled_data.ndim == 2 or result.ndim == 2:
-                        result[mask] = resampled_data[mask]
-                      else:
-                        result[mask] = resampled_data[mask][:3] # take only the first 3 channels
+                        if resampled_data.ndim == result.ndim:
+                            result[mask] = resampled_data[mask]
+                        elif resampled_data.ndim > result.ndim:
+                            result[mask] = resampled_data[mask][..., :result.shape[-1]]
+                        else:
+                            result[mask] = resampled_data[mask][..., np.newaxis]
+
         return result
 
     def _resample_if_needed(self, tile_data: TileData, target_tile: mercantile.Tile) -> np.ndarray:
@@ -313,11 +316,10 @@ class TerrainRGBMerger:
                                         z=tile_data.source_zoom
                                         )
           source_bounds = mercantile.bounds(source_tile)
-          
+
           x_offset = (target_tile.x % (2**(target_tile.z - tile_data.source_zoom)))
           y_offset = (target_tile.y % (2**(target_tile.z - tile_data.source_zoom)))
-          
-          #Determine the sub region bounds.
+
           sub_region_width = (source_bounds.east - source_bounds.west) / (2**(target_tile.z - tile_data.source_zoom))
           sub_region_height = (source_bounds.north - source_bounds.south) / (2**(target_tile.z - tile_data.source_zoom))
 
@@ -325,12 +327,13 @@ class TerrainRGBMerger:
           sub_region_south = source_bounds.south + (y_offset * sub_region_height)
           sub_region_east = sub_region_west + sub_region_width
           sub_region_north = sub_region_south + sub_region_height
+
           tile_size = self.default_tile_size
           if tile_data.meta is not None and 'width' in tile_data.meta and 'height' in tile_data.meta:
               tile_size = tile_data.meta['width']
 
           sub_region_transform = rasterio.transform.from_bounds(sub_region_west, sub_region_south, sub_region_east, sub_region_north, tile_size, tile_size)
-          
+
           with rasterio.io.MemoryFile() as memfile:
             with memfile.open(**tile_data.meta) as src:
               dst_data = np.zeros((1, tile_size, tile_size), dtype=np.float32)
