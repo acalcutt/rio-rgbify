@@ -419,16 +419,16 @@ class TerrainRGBMerger:
     def process_zoom_level(self, zoom: int):
         """Process all tiles for a given zoom level in parallel"""
         self.logger.info(f"Processing zoom level {zoom}")
-        
+
         # Get list of tiles to process
         tiles = self._get_tiles_for_zoom(zoom)
         self.logger.info(f"Found {len(tiles)} tiles to process")
-        
+
         # Create task tuples with all necessary data
         tasks = [
             (
                 tile,
-                [(s.path, s.encoding.value, s.height_adjustment, s.base_val, s.interval, s.mask_values) 
+                [(s.path, s.encoding.value, s.height_adjustment, s.base_val, s.interval, s.mask_values)
                 for s in self.sources],
                 self.output_path,
                 self.output_encoding.value,
@@ -438,11 +438,12 @@ class TerrainRGBMerger:
             )
             for tile in tiles
         ]
-        
+
         # Process tiles in parallel using the standalone function
         with multiprocessing.Pool(self.processes) as pool:
-            for _ in pool.imap_unordered(lambda task: process_tile_task(self, task), tasks, chunksize=1):
+            for _ in pool.imap_unordered(lambda task: _process_tile_task_with_instance(self, task), tasks, chunksize=1):
                 pass
+
 
     def _get_tiles_for_zoom(self, zoom: int) -> List[mercantile.Tile]:
         """Get list of tiles to process for a given zoom level"""
@@ -492,6 +493,7 @@ class TerrainRGBMerger:
             self.process_zoom_level(zoom)
 
         self.logger.info("Completed processing all zoom levels")
+
 
 def process_tile_task(merger_instance: TerrainRGBMerger, task_tuple: tuple) -> None:
     """Standalone function for processing tiles that can be pickled"""
@@ -555,3 +557,6 @@ def _tile_range(start: mercantile.Tile, stop: mercantile.Tile):
     for x in range(start.x, stop.x + 1):
         for y in range(start.y, stop.y + 1):
             yield x, y
+
+def _process_tile_task_with_instance(merger_instance, task):
+        return process_tile_task(merger_instance, task)
