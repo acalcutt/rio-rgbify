@@ -25,7 +25,7 @@ class ImageEncoder:
         data: ndarray
             (rows x cols) ndarray of data to encode
         encoding: str
-             output tile encoding (mapbox or terrarium)
+            output tile encoding (mapbox or terrarium)
         interval: float
             the interval at which to encode
         base_val: float
@@ -42,6 +42,7 @@ class ImageEncoder:
             a uint8 (3 x rows x cols) or (4 x rows x cols) ndarray with the
             data encoded
         """
+        print(f"data_to_rgb called with shape: {data.shape}, encoding: {encoding}, interval: {interval}, base_val: {base_val}, round_digits: {round_digits}, quantized_alpha: {quantized_alpha}")
         if not isinstance(data, np.ndarray):
             raise ValueError("Input data must be a numpy array")
 
@@ -51,9 +52,8 @@ class ImageEncoder:
             data += 32768
         else:
             data = data.copy()  # Create copy to avoid modifying input
-            data -= base_val  # Apply offset
+            data -= base_val   # Apply offset
             data /= interval
-            data = np.clip(data, -10000, 10000)
 
         data = np.around(data / 2**round_digits) * 2**round_digits
 
@@ -75,15 +75,15 @@ class ImageEncoder:
         else:
             rgb = np.zeros((3, rows, cols), dtype=np.uint8)
             if(encoding == "terrarium"):
-                rgb[0] = data // 256
+                rgb[0] = np.floor(data // 256)
                 rgb[1] = np.floor(data % 256)
                 rgb[2] = np.floor((data - np.floor(data)) * 256)
             else:
-                rgb[0] = ((((data // 256) // 256) / 256) - (((data // 256) // 256) // 256)) * 256
-                rgb[1] = (((data // 256) / 256) - ((data // 256) // 256)) * 256
-                rgb[2] = ((data / 256) - (data // 256)) * 256
+                rgb[0] = np.floor((data // (256 * 256)) % 256)
+                rgb[1] = np.floor((data // 256) % 256)
+                rgb[2] = np.floor(data % 256)
 
-        return rgb
+            return rgb
     
     @staticmethod
     def _decode(data: np.ndarray, base: float, interval: float, encoding: str) -> np.ndarray:
@@ -170,7 +170,7 @@ class ImageEncoder:
         array into a webp bytearray.
 
         Parameters
-        -----------
+        ----------
         data: ndarray
             (3 or 4 x height x width) uint8 RGB array
         profile: None
@@ -201,7 +201,7 @@ class ImageEncoder:
         array as a png-encoded bytearray.
 
         Parameters
-        -----------
+        ----------
         data: ndarray
             (3 or 4 x height x width) uint8 RGB array
         profile: dictionary
@@ -234,7 +234,7 @@ class ImageEncoder:
         Parameters
         ----------
         rgb_data: np.ndarray
-           a (3 x height x width) or (4 x height x width) ndarray with the RGB values
+            a (3 x height x width) or (4 x height x width) ndarray with the RGB values
         output_image_format: ImageFormat
             the format that the array should be encoded to
         default_tile_size: int
@@ -248,9 +248,9 @@ class ImageEncoder:
         image_bytes = BytesIO()
         if rgb_data.size > 0:
             if rgb_data.ndim == 3:
-              image = Image.fromarray(np.moveaxis(rgb_data, 0, -1), 'RGB')
+                image = Image.fromarray(np.moveaxis(rgb_data, 0, -1), 'RGB')
             elif rgb_data.ndim == 4:
-              image = Image.fromarray(np.moveaxis(rgb_data, 0, -1), 'RGBA')
+                image = Image.fromarray(np.moveaxis(rgb_data, 0, -1), 'RGBA')
             else:
                 tile_size = default_tile_size
                 image = Image.fromarray(np.moveaxis(np.zeros((3,tile_size,tile_size),dtype=np.uint8), 0, -1), 'RGB')
