@@ -21,7 +21,7 @@ class ImageEncoder:
         base and interval
 
         Parameters
-        -----------
+        ----------
         data: ndarray
             (rows x cols) ndarray of data to encode
         encoding: str
@@ -52,9 +52,12 @@ class ImageEncoder:
             data += 32768
         else:
             data = data.copy()  # Create copy to avoid modifying input
+            # CLAMP values before encoding for Mapbox encoding
+            data = np.clip(data, base_val, 100000)
             data -= base_val   # Apply offset
             data /= interval
-
+            
+        data = np.nan_to_num(data, nan=0) # Replace nan with 0 before rounding
         data = np.around(data / 2**round_digits) * 2**round_digits
 
         rows, cols = data.shape
