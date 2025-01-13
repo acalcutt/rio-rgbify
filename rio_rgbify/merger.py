@@ -335,28 +335,50 @@ class TerrainRGBMerger:
             return None
 
     def _get_tiles_for_zoom(self, zoom: int) -> List[mercantile.Tile]:
+        """Get list of tiles to process for a given zoom level
+
+        Parameters
+        ----------
+        zoom : int
+            The zoom level for which to get the tiles
+
+        Returns
+        -------
+        List[mercantile.Tile]
+            A list of mercantile.Tile objects for the given zoom level
+        """
         print(f"_get_tiles_for_zoom called with zoom: {zoom}")
+        self.logger.info(f"_get_tiles_for_zoom: Starting for zoom {zoom}")
         tiles = set()
 
         if self.bounds is not None:
+            self.logger.info(f"_get_tiles_for_zoom: Using bounds: {self.bounds}")
             w,s,e,n = self.bounds
             for x, y in _tile_range(mercantile.tile(w, n, zoom), mercantile.tile(e, s, zoom)):
                 tiles.add(mercantile.Tile(x=x, y=y, z=zoom))
         else:
+            self.logger.info(f"_get_tiles_for_zoom: Getting tiles from the last source")
             source = self.sources[-1]
+            self.logger.info(f"_get_tiles_for_zoom: Connecting to database: {source.path}")
             mbtiles_db = MBTilesDatabase(source.path)
+            self.logger.info(f"_get_tiles_for_zoom: Connected to database")
+            self.logger.info(f"_get_tiles_for_zoom: Getting distinct tiles for zoom {zoom}")
             rows = mbtiles_db.get_distinct_tiles(zoom)
+            self.logger.info(f"_get_tiles_for_zoom: Received {len(rows)} rows from get_distinct_tiles")
 
             if not rows:
-                self.logger.warning(f"No tiles found for zoom level {zoom} in source {source.path}")
+                self.logger.warning(f"_get_tiles_for_zoom: No tiles found for zoom level {zoom} in source {source.path}")
             else:
+                #self.logger.debug(f"Rows fetched for zoom level : ")
                 for row in rows:
+                    self.logger.debug(f"_get_tiles_for_zoom: Processing row: {row}")
                     if isinstance(row, tuple) and len(row) == 2:
                         x, y = row
                         tiles.add(mercantile.Tile(x=x, y=y, z=zoom))
                     else:
-                        self.logger.warning(f"Skipping invalid row: {row}")
+                        self.logger.warning(f"_get_tiles_for_zoom: Skipping invalid row: {row}")
 
+        self.logger.info(f"_get_tiles_for_zoom: Found {len(tiles)} tiles for zoom {zoom}")
         return list(tiles)
 
     def _writer_process(self, write_queue: Queue):
