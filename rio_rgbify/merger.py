@@ -337,6 +337,7 @@ class TerrainRGBMerger:
         try:
             # Extract tiles from all sources
             tile_datas = [self._extract_tile(source, tile.z, tile.x, tile.y, source_conns) for source in self.sources]
+            self.logger.debug(f"tile datas: {len(tile_datas)}")
 
             if not any(tile_datas):
                 self.logger.debug(f"No data found for tile {tile.z}/{tile.x}/{tile.y}")
@@ -345,19 +346,23 @@ class TerrainRGBMerger:
             # Merge the elevation data
             merged_elevation = self._merge_tiles(tile_datas, tile)
             
-            if merged_elevation is not None:
-                # Encode using output format and save
-                rgb_data = ImageEncoder.data_to_rgb(
-                    merged_elevation,
-                    self.output_encoding,
-                    0.1,
-                    base_val=-10000,
-                    quantized_alpha=self.output_quantized_alpha if self.output_encoding == EncodingType.TERRARIUM else False
-                )
-                image_bytes = ImageEncoder.save_rgb_to_bytes(rgb_data, self.output_image_format, self.default_tile_size)
-                logging.debug(f"image_bytes {len(image_bytes)}")
-                write_queue.put((tile, image_bytes))
-                self.logger.info(f"Successfully processed tile {tile.z}/{tile.x}/{tile.y}")
+            if merged_elevation is None:
+               self.logger.debug(f"No merged elevation for {tile.z}/{tile.x}/{tile.y}")
+               return
+            
+            # Encode using output format and save
+            rgb_data = ImageEncoder.data_to_rgb(
+                merged_elevation,
+                self.output_encoding,
+                0.1,
+                base_val=-10000,
+                quantized_alpha=self.output_quantized_alpha if self.output_encoding == EncodingType.TERRARIUM else False
+            )
+            image_bytes = ImageEncoder.save_rgb_to_bytes(rgb_data, self.output_image_format, self.default_tile_size)
+            
+            logging.debug(f"image_bytes {len(image_bytes)}")
+            write_queue.put((tile, image_bytes))
+            self.logger.info(f"Successfully processed tile {tile.z}/{tile.x}/{tile.y}")
         except Exception as e:
             self.logger.error(f"Error processing tile {tile.z}/{tile.x}/{tile.y}: {e}")
             raise
@@ -533,25 +538,29 @@ def process_tile_task(task_tuple: tuple) -> None:
             tile_datas.append(tile_data)
 
         if not any(tile_datas):
+            logging.debug(f"No tile data for {tile.z}/{tile.x}/{tile.y}")
             return
 
         # Merge the elevation data
         merged_elevation = merger_instance._merge_tiles(tile_datas, tile)
         
-        if merged_elevation is not None:
-            # Encode using output format
-            rgb_data = ImageEncoder.data_to_rgb(
-                merged_elevation,
-                output_encoding,
-                0.1,
-                base_val=-10000,
-                quantized_alpha=output_alpha
-            )
-            image_bytes = ImageEncoder.save_rgb_to_bytes(rgb_data, output_format)
-            logging.debug(f"image_bytes {len(image_bytes)}")
-            # Write to output database
-            with MBTilesDatabase(output_path) as db:
-               db.insert_tile([tile.x, tile.y, tile.z], image_bytes)
+        if merged_elevation is None:
+            logging.debug(f"No merged elevation {tile.z}/{tile.x}/{tile.y}")
+            return
+        
+        # Encode using output format
+        rgb_data = ImageEncoder.data_to_rgb(
+            merged_elevation,
+            output_encoding,
+            0.1,
+            base_val=-10000,
+            quantized_alpha=output_alpha
+        )
+        image_bytes = ImageEncoder.save_rgb_to_bytes(rgb_data, output_format)
+        logging.debug(f"image_bytes {len(image_bytes)}")
+        # Write to output database
+        with MBTilesDatabase(output_path) as db:
+           db.insert_tile([tile.x, tile.y, tile.z], image_bytes)
 
     except Exception as e:
         logging.error(f"Error processing tile {tile.z}/{tile.x}/{tile.y}: {e}")
