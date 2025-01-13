@@ -44,7 +44,6 @@ class ImageEncoder:
             data encoded
         """
         print(f"data_to_rgb called with shape: {data.shape}, encoding: {encoding}, interval: {interval}, base_val: {base_val}, round_digits: {round_digits}, quantized_alpha: {quantized_alpha}")
-        print(f"data1: {data}")
         if not isinstance(data, np.ndarray):
             raise ValueError("Input data must be a numpy array")
 
@@ -61,7 +60,6 @@ class ImageEncoder:
             
         data = np.nan_to_num(data, nan=0) # Replace nan with 0 before rounding
         data = np.around(data / 2**round_digits) * 2**round_digits
-        print(f"data2: {data}")
 
         rows, cols = data.shape
         if quantized_alpha and encoding == "terrarium":
@@ -77,6 +75,7 @@ class ImageEncoder:
             rgb[0] = data // 256
             rgb[1] = np.floor(data % 256)
             rgb[2] = np.floor((data - np.floor(data)) * 256)
+            print(f"rgb terrarium: {rgb}")
             return rgb
         else:
             rgb = np.zeros((3, rows, cols), dtype=np.uint8)
@@ -88,6 +87,7 @@ class ImageEncoder:
                 rgb[0] = np.floor((data / (256 * 256)) % 256).astype(np.uint8)
                 rgb[1] = np.floor((data / 256) % 256).astype(np.uint8)
                 rgb[2] = np.floor(data % 256).astype(np.uint8)
+                print(f"rgb mapbox: {rgb}")
             return rgb
     
     @staticmethod
