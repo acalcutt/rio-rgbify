@@ -37,12 +37,11 @@ def _init_worker(main_worker, inpath, g_work_func, g_args):
     global work_func
     global global_args
     global src
-    global worker_queue_holder
     work_func = g_work_func
     global_args = g_args
 
     src = rasterio.open(inpath)
-    worker_queue_holder = Queue()
+   
     
     
 def _main_worker(inpath, g_work_func, g_args):
@@ -312,6 +311,8 @@ class RGBTiler:
           
           def _run_pool():
               global worker_queue_holder
+              os.environ['RASTERIO_NUM_THREADS'] = '1'
+              worker_queue_holder = Queue()
               self.pool = ctx.Pool(
                 processes,
                 initializer = _init_worker,
