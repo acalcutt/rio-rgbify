@@ -296,9 +296,8 @@ class RGBTiler:
       else:
           self.pool = Pool(
               processes,
-              _main_worker,
-              (self.inpath, self.run_function, self.global_args),
-              initializer = _create_worker_queue
+              initializer = _create_worker_queue,
+              initargs = (_main_worker, (self.inpath, self.run_function, self.global_args)),
           )
 
       if self.bounding_tile is None:
