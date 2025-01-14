@@ -561,7 +561,7 @@ def process_tile_task(task_tuple: tuple) -> None:
         print(f"image_bytes {len(image_bytes)}")
         # Write to output database
         with MBTilesDatabase(output_path) as db:
-           db.insert_tile([tile.y, tile.x, tile.z], image_bytes)
+           db.insert_tile([tile.x, tile.y, tile.z], image_bytes)
 
     except Exception as e:
         logging.error(f"Error processing tile {tile.z}/{tile.x}/{tile.y}: {e}")
