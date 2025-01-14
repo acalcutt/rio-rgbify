@@ -181,9 +181,10 @@ class ImageEncoder:
         image.save(image_bytes, format="WEBP", lossless=True, **kwargs)
         image_bytes.seek(0)
       
-        with rasterio.io.MemoryFile(image_bytes.read()) as memfile:
+        with rasterio.io.MemoryFile() as memfile:
+            memfile.write(image_bytes.read())
             with memfile.open(driver="WEBP") as dataset:
-                return memfile.read()
+                return dataset.read()
     
     @staticmethod
     def encode_as_png(rgb, kwargs, transform):
@@ -203,9 +204,10 @@ class ImageEncoder:
         image.save(image_bytes, format="PNG", **kwargs)
         image_bytes.seek(0)
       
-        with rasterio.io.MemoryFile(image_bytes.read()) as memfile:
-            with memfile.open(driver="PNG") as dataset:
-                return memfile.read()
+        with rasterio.io.MemoryFile() as memfile:
+             memfile.write(image_bytes.read())
+             with memfile.open(driver="PNG") as dataset:
+                return dataset.read()
 
     @staticmethod
     def save_rgb_to_bytes(rgb_data: np.ndarray, output_image_format: str | ImageFormat, default_tile_size: int = 512) -> bytes:
