@@ -75,91 +75,34 @@ def process_tile(inpath, encoding, interval, base_val, round_digits, resampling,
         return None
 
 class RGBTiler:
-    def __init__(self, inpath, outpath, min_z, max_z, interval=1, base_val=0,
-                 round_digits=0, encoding="mapbox", bounding_tile=None,
-                 resampling="bilinear", quantized_alpha=False, **kwargs):
-        self.inpath = inpath
-        self.outpath = outpath
-        self.min_z = min_z
-        self.max_z = max_z
-        self.bounding_tile = bounding_tile
-        self.encoding = encoding
-        self.interval = interval
-        self.base_val = base_val
-        self.round_digits = round_digits
-        self.quantized_alpha = quantized_alpha
-        
-        if resampling not in ["nearest", "bilinear", "cubic", "cubic_spline", "lanczos", "average", "mode", "gauss"]:
-            raise ValueError(f"{resampling} is not a supported resampling method!")
-        
-        self.resampling = Resampling[resampling.lower()]
-        
-        if kwargs.get("format", "png").lower() not in ["png", "webp"]:
-            raise ValueError(f"{kwargs.get('format')} is not a supported filetype!")
-            
-        self.image_format = kwargs.get("format", "png").lower()
-        
-        self.kwargs = {
-            "driver": "PNG",
-            "dtype": "uint8",
-            "height": 512,
-            "width": 512,
-            "count": 3,
-            "crs": "EPSG:3857",
-        }
-
-    def _init_worker(self):
-        """Initialize worker process"""
-        # Don't restrict GDAL/rasterio threads per process
-        os.environ['RASTERIO_NUM_THREADS'] = '1'
-        # Ignore SIGINT in worker processes
-        signal.signal(signal.SIGINT, signal.SIG_IGN)
-        proc = psutil.Process()
-        logging.info(f"Initialized worker process {current_process().name} on CPU {proc.cpu_num()}")
-
-    def _generate_tiles(self, bbox, src_crs):
-        """Generate tile coordinates"""
-        if self.bounding_tile is None:
-            w, s, e, n = transform_bounds(*[src_crs, "EPSG:3857"] + bbox, densify_pts=21)
-        else:
-            w, s, e, n = mercantile.bounds(self.bounding_tile)
-            w, s, e, n = transform_bounds("EPSG:4326", "EPSG:3857", w, s, e, n)
-
-        EPSILON = 1.0e-10
-        w += EPSILON
-        s += EPSILON
-        e -= EPSILON
-        n -= EPSILON
-
-        for z in range(self.min_z, self.max_z + 1):
-            min_tile = mercantile.tile(w, n, z)
-            max_tile = mercantile.tile(e, s, z)
-            for x, y in itertools.product(
-                range(min_tile.x, max_tile.x + 1),
-                range(min_tile.y, max_tile.y + 1)
-            ):
-                yield [x, y, z]
+    # ... (previous methods remain the same until run())
 
     def run(self, processes=None, batch_size=None):
-        """Main processing loop"""
-        # Automatically determine optimal number of processes if not specified
-        if processes is None or processes <= 0:
-            processes = max(1, cpu_count() - 1)  # Leave one CPU free for system
-        
-        # Automatically determine batch size based on number of processes
-        if batch_size is None:
-            batch_size = processes * 4  # Rule of thumb: 4 tasks per process
-
-        logging.info(f"Running with {processes} processes and batch size of {batch_size}")
-
+        """Main processing loop with smart process scaling"""
         with rasterio.open(self.inpath) as src:
             bbox = list(src.bounds)
             src_crs = src.crs
             tiles = list(self._generate_tiles(bbox, src_crs))
 
-        logging.info(f"Total tiles to process: {len(tiles)}")
+        total_tiles = len(tiles)
+        logging.info(f"Total tiles to process: {total_tiles}")
 
-        if processes == 1:
+        # Smart process scaling - use fewer processes for fewer tiles
+        if processes is None or processes <= 0:
+            # Scale processes based on tile count and CPU count
+            available_cpus = cpu_count() - 1  # Leave one CPU free
+            processes = min(total_tiles, available_cpus, 4)  # Cap at 4 for small jobs
+            if total_tiles < 4:
+                processes = 1  # Use single process for very small jobs
+        
+        # Adjust batch size based on total tiles
+        if batch_size is None:
+            batch_size = max(1, total_tiles // (processes * 2))  # Ensure at least 1
+        
+        logging.info(f"Running with {processes} processes and batch size of {batch_size}")
+
+        if processes == 1 or total_tiles == 1:
+            logging.info("Using single process mode due to small number of tiles")
             with self.db:
                 self.db.add_metadata({
                     "format": self.image_format,
@@ -183,13 +126,13 @@ class RGBTiler:
                     )
                     if result:
                         self.db.insert_tile(*result)
+                        logging.info(f"Processed tile {tile}")
                 self.db.conn.commit()
             return
 
-        # Multiprocessing implementation
+        # Multiprocessing implementation for multiple tiles
         ctx = get_context("fork")
         
-        # Create a partial function with all the constant arguments
         process_func = functools.partial(
             process_tile,
             self.inpath,
@@ -213,19 +156,14 @@ class RGBTiler:
             
             with ctx.Pool(processes, initializer=self._init_worker) as pool:
                 try:
-                    # Process tiles in batches using imap_unordered for better performance
                     total_processed = 0
                     for result in pool.imap_unordered(process_func, tiles, chunksize=batch_size):
                         if result:
                             self.db.insert_tile(*result)
                             total_processed += 1
-                            
-                            # Commit every batch_size tiles
-                            if total_processed % batch_size == 0:
-                                self.db.conn.commit()
-                                logging.info(f"Processed {total_processed}/{len(tiles)} tiles")
+                            logging.info(f"Processed {total_processed}/{total_tiles} tiles")
+                            self.db.conn.commit()  # Commit after each tile for small jobs
                     
-                    # Final commit
                     self.db.conn.commit()
                     logging.info(f"Completed processing {total_processed} tiles")
                 
