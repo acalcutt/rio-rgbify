@@ -352,6 +352,7 @@ class RGBTiler:
 
               self.pool.close()
               self.pool.join()
+              self.db.conn.commit()
 
           _run_pool()
       return None
