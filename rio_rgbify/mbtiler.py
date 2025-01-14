@@ -75,7 +75,108 @@ def process_tile(inpath, encoding, interval, base_val, round_digits, resampling,
         return None
 
 class RGBTiler:
-    # ... (previous methods remain the same until run())
+    """
+    Takes continuous source data of an arbitrary bit depth and encodes it
+    in parallel into RGB tiles in an MBTiles file. Provided with a context manager:
+    ```
+    with RGBTiler(inpath, outpath, min_z, max_x, **kwargs) as tiler:
+        tiler.run(processes)
+    ```
+
+    Parameters
+    -----------
+    inpath: string
+        filepath of the source file to read and encode
+    outpath: string
+        filepath of the output `mbtiles`
+    min_z: int
+        minimum zoom level to tile
+    max_z: int
+        maximum zoom level to tile
+
+    Keyword Arguments
+    ------------------
+    baseval: float
+        the base value of the RGB numbering system.
+        (will be treated as zero for this encoding)
+        Default=0
+    interval: float
+        the interval at which to encode
+        Default=1
+    round_digits: int
+        Erased less significant digits
+        Default=0
+    encoding: str
+        output tile encoding (mapbox or terrarium)
+        Default=mapbox
+    format: str
+        output tile image format (png or webp)
+        Default=png
+    bounding_tile: list
+        [x, y, z] of bounding tile; limits tiled output to this extent
+
+    Returns
+    --------
+    None
+
+    """
+
+    def __init__(
+        self,
+        inpath,
+        outpath,
+        min_z,
+        max_z,
+        interval=1,
+        base_val=0,
+        round_digits=0,
+        encoding="mapbox",
+        resampling=Resampling.nearest,
+        quantized_alpha=True,
+        bounding_tile=None,
+        **kwargs
+    ):
+        self.inpath = inpath
+        self.outpath = outpath
+        self.min_z = min_z
+        self.max_z = max_z
+        self.bounding_tile = bounding_tile
+        self.encoding = encoding
+        self.interval = interval
+        self.base_val = base_val
+        self.round_digits = round_digits
+        self.resampling = resampling
+        self.quantized_alpha = quantized_alpha
+        self.kwargs = kwargs
+        
+        if "format" not in kwargs:
+            self.image_format = "png"
+        elif kwargs["format"].lower() == "png":
+            self.image_format = "png"
+        elif kwargs["format"].lower() == "webp":
+            self.image_format = "webp"
+        else:
+            raise ValueError(f"{kwargs['format']} is not a supported filetype!")
+
+
+    def _generate_tiles(self, bbox, src_crs):
+      
+        if self.bounding_tile is None:
+          tiles = mercantile.tiles(
+              *bbox, zooms=range(self.min_z, self.max_z + 1), truncate=False
+          )
+        else:
+          constrained_bbox = list(mercantile.bounds(self.bounding_tile))
+          tiles = mercantile.tiles(
+                *constrained_bbox, zooms=range(self.min_z, self.max_z + 1), truncate=False
+            )
+        
+        for tile in tiles:
+            yield tile
+
+    def _init_worker(self):
+        signal.signal(signal.SIGINT, signal.SIG_IGN)
+
 
     def run(self, processes=None, batch_size=None):
         """Main processing loop with smart process scaling"""

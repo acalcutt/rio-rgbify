@@ -14,6 +14,7 @@ from rio_rgbify.image import ImageEncoder
 from typing import Dict
 import sqlite3
 
+
 def _rgb_worker(data, window, ij, g_args):
     return ImageEncoder.data_to_rgb(
         data[0][g_args["bidx"] - 1], g_args["encoding"], g_args["interval"], g_args["round_digits"], g_args["base_val"]
@@ -95,6 +96,7 @@ def cli():
     help="If true, will add a quantized alpha channel to terrarium tiles (Terrarium Only)",
 )
 @click.option("--workers", "-j", type=int, default=4, help="Workers to run [DEFAULT=4]")
+@click.option("--batch-size", type=int, default=None, help="Batch size for multiprocessing")
 @click.option("--verbose", "-v", is_flag=True, default=False)
 @click.pass_context
 @creation_options
@@ -114,6 +116,7 @@ def rgbify(
     resampling,
     quantized_alpha,
     workers,
+    batch_size,
     verbose,
     creation_options,
 ):
@@ -153,19 +156,23 @@ def rgbify(
         
         resampling_enum = getattr(Resampling, resampling)
 
-        kwargs = {"quality": 80, "lossless": False}
+        kwargs = {"quality": 80, "lossless": False, "format": format}
+
         with RGBTiler(
             src_path,
             dst_path,
-            encoding=encoding,
+            min_z=min_z,
+            max_z=max_z,
             interval=interval,
             base_val=base_val,
             round_digits=round_digits,
+            encoding=encoding,
             resampling=resampling_enum,
             quantized_alpha=quantized_alpha,
+            bounding_tile=bounding_tile,
             **kwargs
         ) as tiler:
-            tiler.run(processes=workers)
+            tiler.run(processes=workers, batch_size=batch_size)
 
     else:
         raise ValueError(
