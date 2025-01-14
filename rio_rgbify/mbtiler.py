@@ -4,31 +4,26 @@ from __future__ import division
 import sys
 import traceback
 import itertools
-
 import mercantile
 import rasterio
 import numpy as np
-from multiprocessing import Pool
-from rasterio._io import virtual_file_to_buffer
+from multiprocessing import Pool, Queue
 from riomucho.single_process_pool import MockTub
-
-from io import BytesIO
-from PIL import Image
-
 from rasterio import transform
 from rasterio.warp import reproject, transform_bounds
-
 from rasterio.enums import Resampling
 
 from rio_rgbify.database import MBTilesDatabase
 from rio_rgbify.image import ImageEncoder
+import logging
+logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
+
 
 buffer = bytes if sys.version_info > (3,) else buffer
 
 work_func = None
 global_args = None
 src = None
-
 
 def _main_worker(inpath, g_work_func, g_args):
     """
@@ -42,7 +37,8 @@ def _main_worker(inpath, g_work_func, g_args):
 
     src = rasterio.open(inpath)
 
-def _tile_worker(tile):
+
+def _tile_worker(tile_and_queue):
     """
     For each tile, and given an open rasterio src, plus a`global_args` dictionary
     with attributes of `encoding`, `base_val`, `interval`, `round_digits` and a `writer_func`,
@@ -59,8 +55,8 @@ def _tile_worker(tile):
     tile, buffer
         tuple with the input tile, and a bytearray with the data encoded into
         the format created in the `writer_func`
-
     """
+    tile, result_queue = tile_and_queue
     x, y, z = tile
 
     bounds = [
@@ -81,12 +77,12 @@ def _tile_worker(tile):
         out,
         dst_transform=toaffine,
         dst_crs="EPSG:3857",
-        resampling=global_args["resampling"], # Pass in global resampling variable
+        resampling=global_args["resampling"],
     )
 
-    out = ImageEncoder.data_to_rgb(out, global_args["encoding"], global_args["interval"], base_val=global_args["base_val"], round_digits=global_args["round_digits"], quantized_alpha=global_args["quantized_alpha"]) # Use static Encoder method and pass in base_val
+    out = ImageEncoder.data_to_rgb(out, global_args["encoding"], global_args["interval"], base_val=global_args["base_val"], round_digits=global_args["round_digits"], quantized_alpha=global_args["quantized_alpha"])  # Use static Encoder method and pass in base_val
 
-    return tile, global_args["writer_func"](out, global_args["kwargs"].copy(), toaffine)
+    result_queue.put((tile, global_args["writer_func"](out, global_args["kwargs"].copy(), toaffine)))
 
 
 def _tile_range(min_tile, max_tile):
@@ -120,7 +116,7 @@ def _make_tiles(bbox, src_crs, minz, maxz):
     Parameters
     -----------
     bbox: list
-        [w, s, e, n] bounds
+        [w, s, e, n] bounds in src_crs
     src_crs: str
         the source crs of the input bbox
     minz: int
@@ -134,7 +130,7 @@ def _make_tiles(bbox, src_crs, minz, maxz):
         generator of [x, y, z] tiles that intersect
         the provided bounding box
     """
-    w, s, e, n = transform_bounds(*[src_crs, "EPSG:4326"] + bbox, densify_pts=21)
+    w, s, e, n = transform_bounds(*[src_crs, "EPSG:3857"] + bbox, densify_pts=21)
 
     EPSILON = 1.0e-10
 
@@ -146,6 +142,25 @@ def _make_tiles(bbox, src_crs, minz, maxz):
     for z in range(minz, maxz + 1):
         for x, y in _tile_range(mercantile.tile(w, n, z), mercantile.tile(e, s, z)):
             yield [x, y, z]
+
+def _create_global_args(interval, base_val, round_digits, encoding, writer_func, resampling, quantized_alpha):
+    return {
+        "kwargs": {
+            "driver": "PNG",
+            "dtype": "uint8",
+            "height": 512,
+            "width": 512,
+            "count": 3,
+            "crs": "EPSG:3857",
+        },
+        "interval": interval,
+        "round_digits": round_digits,
+        "encoding": encoding,
+        "writer_func": writer_func,
+        "resampling": resampling,
+        "base_val": base_val,
+        "quantized_alpha": quantized_alpha,
+    }
 
 
 class RGBTiler:
@@ -192,7 +207,7 @@ class RGBTiler:
         Resampling method to use (nearest, bilinear, cubic, cubic_spline, lanczos, average, mode, gauss)
         Default=bilinear
     quantized_alpha: bool
-       If True, adds the quantized elevation data to alpha channel if using terrarium encoding
+        If True, adds the quantized elevation data to alpha channel if using terrarium encoding
         Default=False
 
 
@@ -237,31 +252,15 @@ class RGBTiler:
             raise ValueError(
                 " is not a supported filetype!".format(kwargs["format"])
             )
-        
+
         if resampling not in ["nearest", "bilinear", "cubic", "cubic_spline", "lanczos", "average", "mode", "gauss"]:
-          raise ValueError(
-            " is not a supported resampling method!".format(resampling)
-          )
-        
-        self.resampling = Resampling(resampling)
+            raise ValueError(
+                " is not a supported resampling method!".format(resampling)
+            )
+
+        self.resampling = Resampling[resampling]
         # global kwargs not used if output is webp
-        self.global_args = {
-            "kwargs": {
-                "driver": "PNG",
-                "dtype": "uint8",
-                "height": 512,
-                "width": 512,
-                "count": 3,
-                "crs": "EPSG:3857",
-            },
-            "interval": interval,
-            "round_digits": round_digits,
-            "encoding": encoding,
-            "writer_func": writer_func,
-            "resampling": self.resampling,
-            "base_val": base_val,
-            "quantized_alpha": quantized_alpha,
-        }
+        self.global_args = _create_global_args(interval, base_val, round_digits, encoding, writer_func, self.resampling, quantized_alpha)
 
     def __enter__(self):
         self.db = MBTilesDatabase(self.outpath)
@@ -272,58 +271,67 @@ class RGBTiler:
             traceback.print_exc()
         self.db.__exit__(ext_t, ext_v, trace)
 
-    def run(self, processes=4):
-        """
-        Warp, encode, and tile
-        """
-        # get the bounding box + crs of the file to tile
-        with rasterio.open(self.inpath) as src:
-            bbox = list(src.bounds)
-            src_crs = src.crs
-        
 
-        # populate metadata with required fields
-        self.db.add_metadata({
-            "format": self.image_format,
-            "name": "",
-            "description": "",
-            "version": "1",
-            "type": "baselayer"
-        })
+    def run(self, processes=4, batch_size=500):
+      """
+      Warp, encode, and tile, processing in batches.
+      """
+      with rasterio.open(self.inpath) as src:
+          bbox = list(src.bounds)
+          src_crs = src.crs
 
-        if processes == 1:
-            # use mock pool for profiling / debugging
-            self.pool = MockTub(
-                _main_worker, (self.inpath, self.run_function, self.global_args)
-            )
-        else:
-            self.pool = Pool(
-                processes,
-                _main_worker,
-                (self.inpath, self.run_function, self.global_args),
-            )
+      self.db.add_metadata({
+          "format": self.image_format,
+          "name": "",
+          "description": "",
+          "version": "1",
+          "type": "baselayer"
+      })
 
-        # generator of tiles to make
-        if self.bounding_tile is None:
-            tiles = _make_tiles(bbox, src_crs, self.min_z, self.max_z)
-        else:
-            constrained_bbox = list(mercantile.bounds(self.bounding_tile))
-            tiles = _make_tiles(constrained_bbox, "EPSG:4326", self.min_z, self.max_z)
-        
-        tilesCount = 0
-        for tile, contents in self.pool.imap_unordered(self.run_function, tiles):
+      if processes == 1:
+          self.pool = MockTub(
+              _main_worker, (self.inpath, self.run_function, self.global_args)
+          )
+      else:
+          self.pool = Pool(
+              processes,
+              _main_worker,
+              (self.inpath, self.run_function, self.global_args),
+          )
+
+      if self.bounding_tile is None:
+          tiles = _make_tiles(bbox, src_crs, self.min_z, self.max_z)
+      else:
+          constrained_bbox = list(mercantile.bounds(self.bounding_tile))
+          tiles = _make_tiles(constrained_bbox, "EPSG:4326", self.min_z, self.max_z)
+
+      tile_batches = self._chunk_iterable(tiles, batch_size)
+
+
+      for batch in tile_batches:
+          logging.info(f"Processing batch of {len(batch)} tiles.")
+          result_queue = Queue()
+          tile_and_queue = [(tile, result_queue) for tile in batch]
+          
+          
+          for _ in self.pool.imap_unordered(self.run_function, tile_and_queue):
+              pass
+
+          while not result_queue.empty():
+            tile, contents = result_queue.get()
             self.db.insert_tile(tile, contents)
 
-            tilesCount = tilesCount + 1
-            # commit data every 1000 tiles (about 150 Mo)
-            # Otherwise, the file .mbtiles-wal becomes huge (same size as the final file). The result is the need to have twice the size of the final Mbtiles on the hard drive
-            if (tilesCount % 1000 == 0):
-              self.db.conn.commit()
+          self.db.conn.commit()  
+          
+      self.pool.close()
+      self.pool.join()
+      return None
 
-
-        self.db.conn.commit()
-
-        self.pool.close()
-        self.pool.join()
-
-        return None
+    def _chunk_iterable(self, iterable, chunk_size):
+        """Helper to yield successive chunks from an iterable."""
+        iterator = iter(iterable)
+        while True:
+            chunk = list(itertools.islice(iterator, chunk_size))
+            if not chunk:
+                break
+            yield chunk
