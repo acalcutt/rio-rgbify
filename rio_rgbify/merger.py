@@ -237,104 +237,88 @@ class TerrainRGBMerger:
         return None
 
     def _merge_tiles(self, tile_datas: List[Optional[TileData]], target_tile: mercantile.Tile) -> Optional[np.ndarray]:
-        """Merge tiles from multiple sources, handling upscaling and priorities
-        
-        Parameters
-        ----------
-        tile_datas : List[Optional[TileData]]
-            A list of TileData objects
-        target_tile : mercantile.Tile
-            The mercantile tile object we are merging into
-        
-        Returns
-        -------
-        Optional[np.ndarray]
-            The merged elevation array, or None if no valid tiles to merge.
-        """
+        """Merge tiles from multiple sources, handling upscaling and priorities"""
+        #print(f"_merge_tiles called with tile_datas: {tile_datas}, target_tile: {target_tile}")
         if not any(tile_datas):
-            return None
+          return None
+        
+        bounds = mercantile.bounds(target_tile)
+        
+        # Use the tile size of the first tile, or the default if no primary tile
+        tile_size = self.default_tile_size
+        if tile_datas[0] is not None and 'width' in tile_datas[0].meta and 'height' in tile_datas[0].meta:
+            tile_size = tile_datas[0].meta['width']
+            
+        target_transform = rasterio.transform.from_bounds(
+          bounds.west, bounds.south, bounds.east, bounds.north,
+          tile_size, tile_size
+          )
         
         result = None
+
         for i, tile_data in enumerate(tile_datas):
             if tile_data is not None:
-                resampled_data = self._resample_if_needed(tile_data, target_tile)
+                resampled_data = self._resample_if_needed(tile_data, target_tile, target_transform, tile_size)
                 
+                #Apply the height adjustment
+                resampled_data += self.sources[i].height_adjustment
                 if result is None:
                     result = resampled_data
                 else:
                     mask = ~np.isnan(resampled_data)
                     if np.any(mask):
-                        if resampled_data.ndim == result.ndim:
-                            result[mask] = resampled_data[mask]
-                        elif resampled_data.ndim > result.ndim:
-                            result[mask] = resampled_data[mask][..., :result.shape[-1]]
-                        else:
-                            result[mask] = resampled_data[mask][..., np.newaxis]
-
+                        result[mask] = resampled_data[mask]
+                
         return result
 
-    def _resample_if_needed(self, tile_data: TileData, target_tile: mercantile.Tile) -> np.ndarray:
-        """Resample tile data if source zoom differs from target
-        
-        Parameters
-        ----------
-        tile_data : TileData
-            The tile data to resample
-        target_tile : mercantile.Tile
-            The mercantile tile object for the resampled data
-
-        Returns
-        -------
-        np.ndarray
-            The resampled elevation array.
-        """
+    def _resample_if_needed(self, tile_data: TileData, target_tile: mercantile.Tile, target_transform, tile_size) -> np.ndarray:
+        """Resample tile data if source zoom differs from target"""
         #print(f"_resample_if_needed called with tile_data: {tile_data}, target_tile: {target_tile}")
-        if tile_data.source_zoom == target_tile.z:
-            if tile_data.data.ndim == 3:
-                return tile_data.data[0]
-            else:
-                return tile_data.data
+        if tile_data.source_zoom != target_tile.z:
+
+          source_tile = mercantile.Tile(x=target_tile.x // (2**(target_tile.z - tile_data.source_zoom)),
+                                        y=target_tile.y // (2**(target_tile.z - tile_data.source_zoom)),
+                                        z=tile_data.source_zoom
+                                        )
+          source_bounds = mercantile.bounds(source_tile)
+
+          
+          
+          x_offset = (target_tile.x % (2**(target_tile.z - tile_data.source_zoom)))
+          y_offset = (target_tile.y % (2**(target_tile.z - tile_data.source_zoom)))
+          
+          #Determine the sub region bounds.
+          sub_region_width = (source_bounds.east - source_bounds.west) / (2**(target_tile.z - tile_data.source_zoom))
+          sub_region_height = (source_bounds.north - source_bounds.south) / (2**(target_tile.z - tile_data.source_zoom))
+
+          sub_region_west = source_bounds.west + (x_offset * sub_region_width)
+          sub_region_south = source_bounds.south + (y_offset * sub_region_height)
+          sub_region_east = sub_region_west + sub_region_width
+          sub_region_north = sub_region_south + sub_region_height
+
+          sub_region_transform = rasterio.transform.from_bounds(sub_region_west, sub_region_south, sub_region_east, sub_region_north, tile_size, tile_size)
+          
+          with rasterio.io.MemoryFile() as memfile:
+            with memfile.open(**tile_data.meta) as src:
+              dst_data = np.zeros((1, tile_size, tile_size), dtype=np.float32)
+              reproject(
+                  source=tile_data.data,
+                  destination=dst_data,
+                  src_transform=tile_data.meta['transform'],
+                  src_crs=tile_data.meta['crs'],
+                  dst_transform=sub_region_transform,
+                  dst_crs=tile_data.meta['crs'],
+                  resampling=self.resampling
+              )
+
+              if dst_data.ndim == 3:
+                  return dst_data[0]
+              else:
+                  return dst_data
+        if tile_data.data.ndim == 3:
+           return tile_data.data[0]
         else:
-            source_tile = mercantile.Tile(x=target_tile.x // (2**(target_tile.z - tile_data.source_zoom)),
-                                         y=target_tile.y // (2**(target_tile.z - tile_data.source_zoom)),
-                                         z=tile_data.source_zoom
-                                         )
-            source_bounds = mercantile.bounds(source_tile)
-
-            x_offset = (target_tile.x % (2**(target_tile.z - tile_data.source_zoom)))
-            y_offset = (target_tile.y % (2**(target_tile.z - tile_data.source_zoom)))
-
-            sub_region_width = (source_bounds.east - source_bounds.west) / (2**(target_tile.z - tile_data.source_zoom))
-            sub_region_height = (source_bounds.north - source_bounds.south) / (2**(target_tile.z - tile_data.source_zoom))
-
-            sub_region_west = source_bounds.west + (x_offset * sub_region_width)
-            sub_region_south = source_bounds.south + (y_offset * sub_region_height)
-            sub_region_east = sub_region_west + sub_region_width
-            sub_region_north = sub_region_south + sub_region_height
-
-            tile_size = self.default_tile_size
-            if tile_data.meta is not None and 'width' in tile_data.meta and 'height' in tile_data.meta:
-                tile_size = tile_data.meta['width']
-
-            sub_region_transform = rasterio.transform.from_bounds(sub_region_west, sub_region_south, sub_region_east, sub_region_north, tile_size, tile_size)
-
-            with rasterio.io.MemoryFile() as memfile:
-                with memfile.open(**tile_data.meta) as src:
-                    dst_data = np.zeros((1, tile_size, tile_size), dtype=np.float32)
-                    reproject(
-                        source=tile_data.data,
-                        destination=dst_data,
-                        src_transform=tile_data.meta['transform'],
-                        src_crs=tile_data.meta['crs'],
-                        dst_transform=sub_region_transform,
-                        dst_crs=tile_data.meta['crs'],
-                        resampling=self.resampling
-                    )
-
-                    if dst_data.ndim == 3:
-                       return dst_data[0]
-                    else:
-                       return dst_data
+           return tile_data.data
 
     def process_tile(self, tile: mercantile.Tile, source_conns: Dict[Path, sqlite3.Connection], write_queue: Queue) -> None:
         """Process a single tile, merging data from multiple sources"""
