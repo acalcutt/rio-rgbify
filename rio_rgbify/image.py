@@ -229,19 +229,21 @@ class ImageEncoder:
         return contents
 
     @staticmethod
-    def save_rgb_to_bytes(rgb_data: np.ndarray, output_image_format: ImageFormat, default_tile_size: int = 512) -> bytes:
+    def save_rgb_to_bytes(rgb_data: np.ndarray, output_image_format: str | ImageFormat, default_tile_size: int = 512) -> bytes:
         print(f"save_rgb_to_bytes called with rgb data shape {rgb_data.shape}")
-        print(f"Requested format: {output_image_format}, type: {type(output_image_format)}")  # Debug the format
-        print(f"Comparison with WEBP: {output_image_format == ImageFormat.WEBP}")  # Debug the comparison
+        print(f"Requested format: {output_image_format}, type: {type(output_image_format)}")
         
-        if rgb_data.size == 0:
-            print("rgb_data size is 0")
-            return bytes()
-            
+        # Convert string to enum if needed
+        if isinstance(output_image_format, str):
+            try:
+                output_image_format = ImageFormat(output_image_format.lower())
+            except ValueError:
+                print(f"Invalid format {output_image_format}, falling back to PNG")
+                output_image_format = ImageFormat.PNG
+        
+        print(f"Using format: {output_image_format}")
+        
         try:
-            # Add data validation
-            print(f"RGB data stats - min: {rgb_data.min()}, max: {rgb_data.max()}, dtype: {rgb_data.dtype}")
-            
             # Create image
             if rgb_data.ndim == 3:
                 moved_data = np.moveaxis(rgb_data, 0, -1).astype(np.uint8)
@@ -256,34 +258,19 @@ class ImageEncoder:
             
             print(f"Image created - size: {image.size}, mode: {image.mode}")
             
-            # Save to bytes with explicit error checking
             with BytesIO() as f:
-                try:
-                    if output_image_format == ImageFormat.WEBP:
-                        print("Attempting to save as WebP")
-                        image.save(f, format='WEBP', lossless=True)
-                    else:
-                        print("Attempting to save as PNG")
-                        image.save(f, format='PNG')
-                    
-                    f.seek(0)  # Make sure we're at the start of the buffer
-                    image_bytes = f.getvalue()
-                    print(f"Buffer size after save: {len(image_bytes)}")
-                    
-                    if len(image_bytes) == 0:
-                        raise ValueError("Image encoding produced empty bytes")
-                        
-                    return bytes(image_bytes)
-                    
-                except Exception as e:
-                    print(f"Error during image save: {str(e)}")
-                    # Try PNG as fallback
-                    f.seek(0)
-                    f.truncate()
-                    print("Attempting PNG fallback")
+                if output_image_format == ImageFormat.WEBP:
+                    print("Attempting to save as WebP")
+                    image.save(f, format='WEBP', lossless=True)
+                else:
+                    print("Attempting to save as PNG")
                     image.save(f, format='PNG')
-                    f.seek(0)
-                    return bytes(f.getvalue())
+                
+                f.seek(0)
+                image_bytes = f.getvalue()
+                print(f"Buffer size after save: {len(image_bytes)}")
+                
+                return bytes(image_bytes)
                 
         except Exception as e:
             print(f"Failed to encode image: {str(e)}")
