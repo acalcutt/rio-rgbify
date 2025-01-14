@@ -7,8 +7,13 @@ import itertools
 import mercantile
 import rasterio
 import numpy as np
-from multiprocessing import Pool, Queue
+from multiprocessing import Pool, Queue, Manager
+from rasterio._io import virtual_file_to_buffer
 from riomucho.single_process_pool import MockTub
+
+from io import BytesIO
+from PIL import Image
+
 from rasterio import transform
 from rasterio.warp import reproject, transform_bounds
 from rasterio.enums import Resampling
@@ -24,7 +29,12 @@ buffer = bytes if sys.version_info > (3,) else buffer
 work_func = None
 global_args = None
 src = None
+worker_queue_holder = None
 
+def _create_worker_queue():
+    global worker_queue_holder
+    worker_queue_holder = Manager().Queue()
+    
 def _main_worker(inpath, g_work_func, g_args):
     """
     Util for setting global vars w/ a Pool
@@ -38,7 +48,7 @@ def _main_worker(inpath, g_work_func, g_args):
     src = rasterio.open(inpath)
 
 
-def _tile_worker(tile_and_queue):
+def _tile_worker(tile):
     """
     For each tile, and given an open rasterio src, plus a`global_args` dictionary
     with attributes of `encoding`, `base_val`, `interval`, `round_digits` and a `writer_func`,
@@ -56,7 +66,6 @@ def _tile_worker(tile_and_queue):
         tuple with the input tile, and a bytearray with the data encoded into
         the format created in the `writer_func`
     """
-    tile, result_queue = tile_and_queue
     x, y, z = tile
 
     bounds = [
@@ -81,8 +90,8 @@ def _tile_worker(tile_and_queue):
     )
 
     out = ImageEncoder.data_to_rgb(out, global_args["encoding"], global_args["interval"], base_val=global_args["base_val"], round_digits=global_args["round_digits"], quantized_alpha=global_args["quantized_alpha"])  # Use static Encoder method and pass in base_val
-
-    result_queue.put((tile, global_args["writer_func"](out, global_args["kwargs"].copy(), toaffine)))
+    global worker_queue_holder
+    worker_queue_holder.put((tile, global_args["writer_func"](out, global_args["kwargs"].copy(), toaffine)))
 
 
 def _tile_range(min_tile, max_tile):
@@ -258,7 +267,7 @@ class RGBTiler:
                 " is not a supported resampling method!".format(resampling)
             )
 
-        self.resampling = Resampling[resampling]
+        self.resampling = Resampling(resampling)
         # global kwargs not used if output is webp
         self.global_args = _create_global_args(interval, base_val, round_digits, encoding, writer_func, self.resampling, quantized_alpha)
 
@@ -273,60 +282,59 @@ class RGBTiler:
 
 
     def run(self, processes=4, batch_size=500):
-        """
-        Warp, encode, and tile, processing in batches.
-        """
-        with rasterio.open(self.inpath) as src:
-            bbox = list(src.bounds)
-            src_crs = src.crs
+      """
+      Warp, encode, and tile, processing in batches.
+      """
+      with rasterio.open(self.inpath) as src:
+          bbox = list(src.bounds)
+          src_crs = src.crs
 
-        if processes == 1:
-            self.pool = MockTub(
-                _main_worker, (self.inpath, self.run_function, self.global_args)
-            )
-        else:
-            self.pool = Pool(
-                processes,
-                _main_worker,
-                (self.inpath, self.run_function, self.global_args),
-            )
+      if processes == 1:
+          self.pool = MockTub(
+              _main_worker, (self.inpath, self.run_function, self.global_args)
+          )
+      else:
+          self.pool = Pool(
+              processes,
+              _main_worker,
+              (self.inpath, self.run_function, self.global_args),
+              initializer = _create_worker_queue
+          )
 
-        if self.bounding_tile is None:
-            tiles = _make_tiles(bbox, src_crs, self.min_z, self.max_z)
-        else:
-            constrained_bbox = list(mercantile.bounds(self.bounding_tile))
-            tiles = _make_tiles(constrained_bbox, "EPSG:4326", self.min_z, self.max_z)
+      if self.bounding_tile is None:
+          tiles = _make_tiles(bbox, src_crs, self.min_z, self.max_z)
+      else:
+          constrained_bbox = list(mercantile.bounds(self.bounding_tile))
+          tiles = _make_tiles(constrained_bbox, "EPSG:4326", self.min_z, self.max_z)
 
-        tile_batches = self._chunk_iterable(tiles, batch_size)
+      tile_batches = self._chunk_iterable(tiles, batch_size)
 
-        with self.db:
-           # populate metadata with required fields
-            self.db.add_metadata({
-                "format": self.image_format,
-                "name": "",
-                "description": "",
-                "version": "1",
-                "type": "baselayer"
-            })
+      with self.db:
+         # populate metadata with required fields
+          self.db.add_metadata({
+              "format": self.image_format,
+              "name": "",
+              "description": "",
+              "version": "1",
+              "type": "baselayer"
+          })
 
-            for batch in tile_batches:
-                logging.info(f"Processing batch of {len(batch)} tiles.")
-                result_queue = Queue()
-                tile_and_queue = [(tile, result_queue) for tile in batch]
+          for batch in tile_batches:
+              logging.info(f"Processing batch of {len(batch)} tiles.")
+              
+              
+              for _ in self.pool.imap_unordered(self.run_function, batch):
+                  pass
 
-
-                for _ in self.pool.imap_unordered(self.run_function, tile_and_queue):
-                    pass
-
-                while not result_queue.empty():
-                  tile, contents = result_queue.get()
+              while not worker_queue_holder.empty():
+                  tile, contents = worker_queue_holder.get()
                   self.db.insert_tile(tile, contents)
 
-                self.db.conn.commit()
+              self.db.conn.commit()
 
-        self.pool.close()
-        self.pool.join()
-        return None
+      self.pool.close()
+      self.pool.join()
+      return None
 
     def _chunk_iterable(self, iterable, chunk_size):
         """Helper to yield successive chunks from an iterable."""
