@@ -7,7 +7,7 @@ import itertools
 import mercantile
 import rasterio
 import numpy as np
-from multiprocessing import Pool, Queue, Manager, get_context
+from multiprocessing import Pool, Queue, get_context
 import os
 from rasterio._io import virtual_file_to_buffer
 from riomucho.single_process_pool import MockTub
@@ -32,10 +32,7 @@ global_args = None
 src = None
 worker_queue_holder = None
 
-def _create_worker_queue():
-    global worker_queue_holder
-    worker_queue_holder = Manager().Queue()
-    
+
 def _init_worker(main_worker, inpath, g_work_func, g_args):
     global work_func
     global global_args
@@ -45,7 +42,7 @@ def _init_worker(main_worker, inpath, g_work_func, g_args):
     global_args = g_args
 
     src = rasterio.open(inpath)
-    worker_queue_holder = Manager().Queue()
+    worker_queue_holder = Queue()
     
     
 def _main_worker(inpath, g_work_func, g_args):
@@ -314,6 +311,7 @@ class RGBTiler:
           
           
           def _run_pool():
+              global worker_queue_holder
               self.pool = ctx.Pool(
                 processes,
                 initializer = _init_worker,
