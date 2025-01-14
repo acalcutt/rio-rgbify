@@ -7,7 +7,7 @@ import itertools
 import mercantile
 import rasterio
 import numpy as np
-from multiprocessing import Pool, Queue, get_context, current_process, Manager
+from multiprocessing import Pool, Queue, get_context, current_process, cpu_count
 import os
 from riomucho.single_process_pool import MockTub
 from io import BytesIO
@@ -20,11 +20,16 @@ from rio_rgbify.image import ImageEncoder
 import logging
 import signal
 import functools
+import psutil
 
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
 
 def process_tile(inpath, encoding, interval, base_val, round_digits, resampling, quantized_alpha, kwargs, tile):
     """Standalone tile processing function"""
+    # Log the process ID and CPU core
+    proc = psutil.Process()
+    logging.info(f"Processing tile {tile} on CPU {proc.cpu_num()} (PID: {os.getpid()})")
+    
     try:
         with rasterio.open(inpath) as src:
             x, y, z = tile
@@ -105,9 +110,12 @@ class RGBTiler:
 
     def _init_worker(self):
         """Initialize worker process"""
-        signal.signal(signal.SIGINT, signal.SIG_IGN)
+        # Don't restrict GDAL/rasterio threads per process
         os.environ['RASTERIO_NUM_THREADS'] = '1'
-        logging.info(f"Initialized worker process {current_process().name}")
+        # Ignore SIGINT in worker processes
+        signal.signal(signal.SIGINT, signal.SIG_IGN)
+        proc = psutil.Process()
+        logging.info(f"Initialized worker process {current_process().name} on CPU {proc.cpu_num()}")
 
     def _generate_tiles(self, bbox, src_crs):
         """Generate tile coordinates"""
@@ -132,15 +140,24 @@ class RGBTiler:
             ):
                 yield [x, y, z]
 
-    def run(self, processes=4, batch_size=500):
+    def run(self, processes=None, batch_size=None):
         """Main processing loop"""
-        if processes < 1:
-            raise ValueError("Number of processes must be at least 1")
+        # Automatically determine optimal number of processes if not specified
+        if processes is None or processes <= 0:
+            processes = max(1, cpu_count() - 1)  # Leave one CPU free for system
+        
+        # Automatically determine batch size based on number of processes
+        if batch_size is None:
+            batch_size = processes * 4  # Rule of thumb: 4 tasks per process
+
+        logging.info(f"Running with {processes} processes and batch size of {batch_size}")
 
         with rasterio.open(self.inpath) as src:
             bbox = list(src.bounds)
             src_crs = src.crs
             tiles = list(self._generate_tiles(bbox, src_crs))
+
+        logging.info(f"Total tiles to process: {len(tiles)}")
 
         if processes == 1:
             with self.db:
@@ -196,17 +213,21 @@ class RGBTiler:
             
             with ctx.Pool(processes, initializer=self._init_worker) as pool:
                 try:
-                    # Process tiles in batches
-                    for i in range(0, len(tiles), batch_size):
-                        batch = tiles[i:i + batch_size]
-                        results = pool.map(process_func, batch)
-                        
-                        # Handle results in main process
-                        for result in filter(None, results):
+                    # Process tiles in batches using imap_unordered for better performance
+                    total_processed = 0
+                    for result in pool.imap_unordered(process_func, tiles, chunksize=batch_size):
+                        if result:
                             self.db.insert_tile(*result)
-                        
-                        self.db.conn.commit()
-                        logging.info(f"Processed batch of {len(batch)} tiles")
+                            total_processed += 1
+                            
+                            # Commit every batch_size tiles
+                            if total_processed % batch_size == 0:
+                                self.db.conn.commit()
+                                logging.info(f"Processed {total_processed}/{len(tiles)} tiles")
+                    
+                    # Final commit
+                    self.db.conn.commit()
+                    logging.info(f"Completed processing {total_processed} tiles")
                 
                 except KeyboardInterrupt:
                     logging.info("Caught KeyboardInterrupt, terminating workers")
