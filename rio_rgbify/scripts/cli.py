@@ -1,7 +1,6 @@
 """rio_rgbify CLI."""
 
 import click
-
 import rasterio as rio
 import numpy as np
 from riomucho import RioMucho
@@ -14,7 +13,6 @@ from rio_rgbify.merger import TerrainRGBMerger, MBTilesSource, EncodingType, Ima
 from rio_rgbify.image import ImageEncoder
 from typing import Dict
 import sqlite3
-
 
 def _rgb_worker(data, window, ij, g_args):
     return ImageEncoder.data_to_rgb(
@@ -152,22 +150,22 @@ def rgbify(
                 raise TypeError(
                     "Bounding tile of {0} is not valid".format(bounding_tile)
                 )
+        
+        resampling_enum = getattr(Resampling, resampling)
 
+        kwargs = {"quality": 80, "lossless": False}
         with RGBTiler(
             src_path,
             dst_path,
+            encoding=encoding,
             interval=interval,
             base_val=base_val,
             round_digits=round_digits,
-            encoding=encoding,
-            format=format,
-            bounding_tile=bounding_tile,
-            max_z=max_z,
-            min_z=min_z,
-            resampling=resampling,
-            quantized_alpha=quantized_alpha
+            resampling=resampling_enum,
+            quantized_alpha=quantized_alpha,
+            **kwargs
         ) as tiler:
-            tiler.run(workers)
+            tiler.run(processes=workers)
 
     else:
         raise ValueError(
@@ -200,7 +198,7 @@ def merge(config, workers, verbose):
             base_val=float(source_data.get("base_val",-10000)),
             interval=float(source_data.get("interval",0.1)),
             mask_values = config_data.get("mask_values",[0.0, -1.0])
-            )
+        )
         source_connections[source.path] = sqlite3.connect(source.path)
         sources.append(source)
     
@@ -217,14 +215,14 @@ def merge(config, workers, verbose):
     bounds = config_data.get("bounds", None)
     
     if bounds is not None:
-        try:
-            bounds = [float(x) for x in bounds]
-            if len(bounds) != 4:
-                raise ValueError("Bounds must be a list of 4 floats in the order west, south, east, north")
-        except Exception:
-            raise TypeError(
-                "Bounding box of  is not valid, must be a comma seperated list of 4 floats in the order west, south, east, north".format(bounds)
-            )
+      try:
+        bounds = [float(x) for x in bounds]
+        if len(bounds) != 4:
+          raise ValueError("Bounds must be a list of 4 floats in the order west, south, east, north")
+      except Exception:
+        raise TypeError(
+          "Bounding box of  is not valid, must be a comma seperated list of 4 floats in the order west, south, east, north".format(bounds)
+        )
 
     merger = TerrainRGBMerger(
         sources = sources,
@@ -240,7 +238,7 @@ def merge(config, workers, verbose):
     )
     
     try:
-      merger.process_all(min_zoom=min_zoom if min_zoom is not None else 0)
+        merger.process_all(min_zoom=min_zoom if min_zoom is not None else 0)
     finally:
-      for conn in source_connections.values():
-        conn.close()
+        for conn in source_connections.values():
+            conn.close()
