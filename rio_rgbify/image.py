@@ -15,33 +15,6 @@ class ImageEncoder:
 
     @staticmethod
     def data_to_rgb(data, encoding, interval, base_val=-10000, round_digits=0, quantized_alpha=False):
-        """
-        Given an arbitrary (rows x cols) ndarray,
-        encode the data into uint8 RGB from an arbitrary
-        base and interval
-
-        Parameters
-        ----------
-        data: ndarray
-            (rows x cols) ndarray of data to encode
-        encoding: str
-            output tile encoding (mapbox or terrarium)
-        interval: float
-            the interval at which to encode
-        base_val: float
-            the base value to apply when using mapbox. Default is -10000
-        round_digits: int
-            erased less significant digits
-        quantized_alpha : bool, optional
-            If True, adds the quantized elevation data to alpha channel if using terrarium encoding
-            Default is False
-
-        Returns
-        --------
-        ndarray: rgb data
-            a uint8 (3 x rows x cols) or (4 x rows x cols) ndarray with the
-            data encoded
-        """
         print(f"data_to_rgb called with shape: {data.shape}, encoding: {encoding}, interval: {interval}, base_val: {base_val}, round_digits: {round_digits}, quantized_alpha: {quantized_alpha}")
         if not isinstance(data, np.ndarray):
             raise ValueError("Input data must be a numpy array")
@@ -51,13 +24,11 @@ class ImageEncoder:
             data = np.clip(data, -32768, 32767)
             data += 32768
         else:
-            data = data.copy()  # Create copy to avoid modifying input
             # CLAMP values before encoding for Mapbox encoding
             data = np.clip(data, base_val, 100000)
             data -= base_val   # Apply offset
             data /= interval
             
-        data = np.nan_to_num(data, nan=0) # Replace nan with 0 before rounding
         data = np.around(data / 2**round_digits) * 2**round_digits
 
         rows, cols = data.shape
@@ -72,19 +43,19 @@ class ImageEncoder:
             rgb[3] = np.clip(alpha_values, 0, 255)
 
             rgb[0] = data // 256
-            rgb[1] = np.floor(data % 256)
+            rgb[1] = np.floor(data % 256);
             rgb[2] = np.floor((data - np.floor(data)) * 256)
             return rgb
         else:
             rgb = np.zeros((3, rows, cols), dtype=np.uint8)
             if(encoding == "terrarium"):
-                rgb[0] = np.floor(data // 256)
-                rgb[1] = np.floor(data % 256)
+                rgb[0] = data // 256
+                rgb[1] = np.floor(data % 256);
                 rgb[2] = np.floor((data - np.floor(data)) * 256)
             else:
-                rgb[0] = np.floor((data / (256 * 256)) % 256).astype(np.uint8)
-                rgb[1] = np.floor((data / 256) % 256).astype(np.uint8)
-                rgb[2] = np.floor(data % 256).astype(np.uint8)
+                rgb[0] = ((((data // 256) // 256) / 256) - (((data // 256) // 256) // 256)) * 256
+                rgb[1] = (((data // 256) / 256) - ((data // 256) // 256)) * 256
+                rgb[2] = ((data / 256) - (data // 256)) * 256
             return rgb
     
     @staticmethod
