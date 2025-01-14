@@ -84,7 +84,7 @@ class MBTilesDatabase:
         """Add tile to database with deduplication logic"""
         x, y, z = tile
         # mbtiles use inverse y indexing
-        tiley = int(math.pow(2, z)) - y - 1
+        #tiley = int(math.pow(2, z)) - y - 1
         
         #create tile_id based on tile contents
         tileDataId = str(self.fnv1a(contents))
