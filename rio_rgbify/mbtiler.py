@@ -9,7 +9,6 @@ import rasterio
 import numpy as np
 from multiprocessing import Pool, Queue, get_context, current_process
 import os
-from rasterio._io import virtual_file_to_buffer
 from riomucho.single_process_pool import MockTub
 from io import BytesIO
 from PIL import Image
@@ -76,41 +75,42 @@ class RGBTiler:
             "crs": "EPSG:3857",
         }
 
-    def _process_tile(self, tile_data):
+    def _process_tile(self, tile_args):
         """Process a single tile with error handling"""
+        tile, input_path = tile_args
         try:
-            tile, src, args = tile_data
-            x, y, z = tile
+            with rasterio.open(input_path) as src:
+                x, y, z = tile
 
-            bounds = [
-                c for i in (
-                    mercantile.xy(*mercantile.ul(x, y + 1, z)),
-                    mercantile.xy(*mercantile.ul(x + 1, y, z)),
+                bounds = [
+                    c for i in (
+                        mercantile.xy(*mercantile.ul(x, y + 1, z)),
+                        mercantile.xy(*mercantile.ul(x + 1, y, z)),
+                    )
+                    for c in i
+                ]
+
+                toaffine = transform.from_bounds(*bounds + [512, 512])
+                out = np.empty((512, 512), dtype=src.meta["dtype"])
+
+                reproject(
+                    rasterio.band(src, 1),
+                    out,
+                    dst_transform=toaffine,
+                    dst_crs="EPSG:3857",
+                    resampling=self.resampling,
                 )
-                for c in i
-            ]
 
-            toaffine = transform.from_bounds(*bounds + [512, 512])
-            out = np.empty((512, 512), dtype=src.meta["dtype"])
+                out = ImageEncoder.data_to_rgb(
+                    out, 
+                    self.encoding, 
+                    self.interval, 
+                    base_val=self.base_val, 
+                    round_digits=self.round_digits,
+                    quantized_alpha=self.quantized_alpha
+                )
 
-            reproject(
-                rasterio.band(src, 1),
-                out,
-                dst_transform=toaffine,
-                dst_crs="EPSG:3857",
-                resampling=self.resampling,
-            )
-
-            out = ImageEncoder.data_to_rgb(
-                out, 
-                self.encoding, 
-                self.interval, 
-                base_val=self.base_val, 
-                round_digits=self.round_digits,
-                quantized_alpha=self.quantized_alpha
-            )
-
-            return tile, self.writer_func(out, self.kwargs.copy(), toaffine)
+                return tile, self.writer_func(out, self.kwargs.copy(), toaffine)
         except Exception as e:
             logging.error(f"Error processing tile {tile}: {str(e)}")
             return None
@@ -168,7 +168,7 @@ class RGBTiler:
                 with self.db:
                     self._init_db()
                     for tile in self._generate_tiles(bbox, src_crs):
-                        result = self._process_tile((tile, src, None))
+                        result = self._process_tile((tile, self.inpath))
                         if result:
                             self.db.insert_tile(*result)
                     self.db.conn.commit()
@@ -185,11 +185,12 @@ class RGBTiler:
                 try:
                     tiles = list(self._generate_tiles(bbox, src_crs))
                     for chunk in self._chunk_tiles(tiles, batch_size):
-                        with rasterio.open(self.inpath) as src:
-                            tile_data = [(tile, src, None) for tile in chunk]
+                        # Create tile_data without database connection
+                        tile_data = [(tile, self.inpath) for tile in chunk]
                         
                         results = pool.map(self._process_tile, tile_data)
                         
+                        # Process results and insert into database in main process
                         for result in filter(None, results):
                             self.db.insert_tile(*result)
                         
