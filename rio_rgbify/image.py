@@ -165,6 +165,7 @@ class ImageEncoder:
 
     @staticmethod
     def encode_as_webp(data, kwargs, transform):
+        print(f"data: {data}")
         """
         Encodes input `data` as a WebP byte array
 
