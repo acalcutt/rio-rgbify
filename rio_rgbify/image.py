@@ -230,23 +230,6 @@ class ImageEncoder:
 
     @staticmethod
     def save_rgb_to_bytes(rgb_data: np.ndarray, output_image_format: ImageFormat, default_tile_size: int = 512) -> bytes:
-        """
-        Converts a numpy array to the specified image format
-        
-        Parameters
-        ----------
-        rgb_data: np.ndarray
-            a (3 x height x width) or (4 x height x width) ndarray with the RGB values
-        output_image_format: ImageFormat
-            the format that the array should be encoded to
-        default_tile_size: int
-            The tile size of the image to create
-            
-        Returns
-        -------
-        bytes:
-            bytes for an image encoded to the given output format
-        """
         print(f"save_rgb_to_bytes called with rgb data shape {rgb_data.shape}")
         
         if rgb_data.size == 0:
@@ -254,29 +237,52 @@ class ImageEncoder:
             return bytes()
             
         try:
-            # Validate dimensions and create image
+            # Add data validation
+            print(f"RGB data stats - min: {rgb_data.min()}, max: {rgb_data.max()}, dtype: {rgb_data.dtype}")
+            
+            # Create image
             if rgb_data.ndim == 3:
-                image = Image.fromarray(np.moveaxis(rgb_data, 0, -1).astype(np.uint8), 'RGB')
+                moved_data = np.moveaxis(rgb_data, 0, -1).astype(np.uint8)
+                print(f"Moved data shape: {moved_data.shape}, dtype: {moved_data.dtype}")
+                image = Image.fromarray(moved_data, 'RGB')
             elif rgb_data.ndim == 4:
-                image = Image.fromarray(np.moveaxis(rgb_data, 0, -1).astype(np.uint8), 'RGBA')
+                moved_data = np.moveaxis(rgb_data, 0, -1).astype(np.uint8)
+                image = Image.fromarray(moved_data, 'RGBA')
             else:
                 tile_size = default_tile_size
                 image = Image.fromarray(np.moveaxis(np.zeros((3,tile_size,tile_size), dtype=np.uint8), 0, -1), 'RGB')
             
-            print(f"image created with shape: {np.array(image).shape}")
+            print(f"Image created - size: {image.size}, mode: {image.mode}")
             
-            # Save to bytes using the enum value
+            # Save to bytes with explicit error checking
             with BytesIO() as f:
-                if output_image_format == ImageFormat.PNG:
+                try:
+                    if output_image_format == ImageFormat.WEBP:
+                        print("Attempting to save as WebP")
+                        image.save(f, format='WEBP', lossless=True)
+                    else:
+                        print("Attempting to save as PNG")
+                        image.save(f, format='PNG')
+                    
+                    f.seek(0)  # Make sure we're at the start of the buffer
+                    image_bytes = f.getvalue()
+                    print(f"Buffer size after save: {len(image_bytes)}")
+                    
+                    if len(image_bytes) == 0:
+                        raise ValueError("Image encoding produced empty bytes")
+                        
+                    return bytes(image_bytes)
+                    
+                except Exception as e:
+                    print(f"Error during image save: {str(e)}")
+                    # Try PNG as fallback
+                    f.seek(0)
+                    f.truncate()
+                    print("Attempting PNG fallback")
                     image.save(f, format='PNG')
-                elif output_image_format == ImageFormat.WEBP:
-                    image.save(f, format='WEBP', lossless=True)
-                image_bytes = bytearray(f.getvalue())
-                
-            print(f"image_bytes size {len(image_bytes)}")
-            return bytes(image_bytes)
+                    f.seek(0)
+                    return bytes(f.getvalue())
                 
         except Exception as e:
-            logging.error(f"Failed to encode image: {e}")
-            # Re-raise the exception for better error handling
+            print(f"Failed to encode image: {str(e)}")
             raise
