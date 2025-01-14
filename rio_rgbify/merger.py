@@ -533,23 +533,22 @@ def process_tile_task(task_tuple: tuple) -> None:
 
         # Extract tiles from all sources
         tile_datas = []
-        for source in sources:
-            tile_data = merger_instance._extract_tile(source, tile.z, tile.x, tile.y, source_conns)
+        for i, source in enumerate(sources):
+            tile_data = merger_instance._extract_tile(source, tile.z, tile.x, tile.y, source_conns, i)
             tile_datas.append(tile_data)
 
         if not any(tile_datas):
-            print(f"No tile data for {tile.z}/{tile.x}/{tile.y}")
+            logging.debug(f"No tile data for {tile.z}/{tile.x}/{tile.y}")
             return
 
         # Merge the elevation data
         merged_elevation = merger_instance._merge_tiles(tile_datas, tile)
         
         if merged_elevation is None:
-            print(f"No merged elevation {tile.z}/{tile.x}/{tile.y}")
+            logging.debug(f"No merged elevation {tile.z}/{tile.x}/{tile.y}")
             return
         
         # Encode using output format
-        print(f"RGB data before encoding shape: {merged_elevation.shape}")
         rgb_data = ImageEncoder.data_to_rgb(
             merged_elevation,
             output_encoding,
@@ -558,7 +557,7 @@ def process_tile_task(task_tuple: tuple) -> None:
             quantized_alpha=output_alpha
         )
         image_bytes = ImageEncoder.save_rgb_to_bytes(rgb_data, output_format)
-        print(f"image_bytes {len(image_bytes)}")
+        logging.debug(f"image_bytes {len(image_bytes)}")
         # Write to output database
         with MBTilesDatabase(output_path) as db:
            db.insert_tile([tile.x, tile.y, tile.z], image_bytes)
