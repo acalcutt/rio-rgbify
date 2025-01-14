@@ -101,7 +101,7 @@ class MBTilesDatabase:
             "INSERT INTO tiles_shallow "
             "(TILES_COL_Z, TILES_COL_X, TILES_COL_Y, TILES_COL_DATA_ID) "
             "VALUES (?, ?, ?, ?);",
-            (z, x, tiley, tileDataId),
+            (z, x, y, tileDataId),
         )
 
     @contextmanager
