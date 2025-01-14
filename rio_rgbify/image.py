@@ -178,13 +178,13 @@ class ImageEncoder:
             raise ValueError(f"Unsupported number of channels in RGB data: {rgb.shape[0]}")
         
         image_bytes = BytesIO()
-        image.save(image_bytes, format="WEBP", lossless=True, **kwargs)
+        image.save(image_bytes, lossless=True, **kwargs)
         image_bytes.seek(0)
       
         with rasterio.io.MemoryFile() as memfile:
             memfile.write(image_bytes.read())
             with memfile.open(driver="WEBP") as dataset:
-                return dataset.read()
+                return memfile.read()
     
     @staticmethod
     def encode_as_png(rgb, kwargs, transform):
@@ -201,13 +201,13 @@ class ImageEncoder:
             raise ValueError(f"Unsupported number of channels in RGB data: {rgb.shape[0]}")
         
         image_bytes = BytesIO()
-        image.save(image_bytes, format="PNG", **kwargs)
+        image.save(image_bytes, **kwargs)
         image_bytes.seek(0)
       
         with rasterio.io.MemoryFile() as memfile:
              memfile.write(image_bytes.read())
              with memfile.open(driver="PNG") as dataset:
-                return dataset.read()
+                return memfile.read()
 
     @staticmethod
     def save_rgb_to_bytes(rgb_data: np.ndarray, output_image_format: str | ImageFormat, default_tile_size: int = 512) -> bytes:
