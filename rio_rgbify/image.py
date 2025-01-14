@@ -164,35 +164,37 @@ class ImageEncoder:
         return table
 
     @staticmethod
-    def encode_as_webp(data, profile=None, affine=None):
+    def encode_as_webp(data, kwargs, transform):
         """
-        Uses BytesIO + PIL to encode a (3 or 4, height, width)
-        array into a webp bytearray.
+        Encodes input `data` as a WebP byte array
 
         Parameters
-        ----------
-        data: ndarray
-            (3 or 4 x height x width) uint8 RGB array
-        profile: None
-            ignored
-        affine: None
-            ignored
+        -----------
+        data: np.array
+            input raster data
+
+        kwargs: dict
+            keyword arguments to pass to the `rasterio.open` call
+        transform: transform
+            the affine transform of the image
 
         Returns
         --------
-        contents: bytearray
-            webp-encoded bytearray of the provided input data
+        buffer: bytearray
+            WebP encoded bytearray
         """
         with BytesIO() as f:
-            if data.ndim == 3:
-                im = Image.fromarray(np.moveaxis(data, 0, 3))
-            elif data.ndim == 4:
-                im = Image.fromarray(np.moveaxis(data, 0, 3), mode='RGBA')
-            else:
-                raise ValueError("unexpected number of image dimensions")
+           if data.ndim == 2:
+              im = Image.fromarray(data.astype("uint8"), mode="L")
+           elif data.ndim == 3:
+              im = Image.fromarray(np.moveaxis(data, 0, -1).astype("uint8"))
+           elif data.ndim == 4:
+              im = Image.fromarray(np.moveaxis(data, 0, -1).astype("uint8"), mode='RGBA')
+           else:
+               raise ValueError("unexpected number of image dimensions")
 
-            im.save(f, format="webp", lossless=True)
-            return f.getvalue()
+           im.save(f, format="webp", lossless=True, **kwargs)
+           return f.getvalue()
 
     @staticmethod
     def encode_as_png(data, profile, dst_transform):
