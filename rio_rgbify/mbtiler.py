@@ -308,46 +308,53 @@ class RGBTiler:
           )
       else:
         
+         
           ctx = get_context("fork")
-          self.pool = ctx.Pool(
-              processes,
-              initializer = _init_worker,
-              initargs = (_main_worker, self.inpath, self.run_function, self.global_args),
-          )
+          
+          
+          
+          def _run_pool():
+              self.pool = ctx.Pool(
+                processes,
+                initializer = _init_worker,
+                initargs = (_main_worker, self.inpath, self.run_function, self.global_args),
+              )
+          
+              if self.bounding_tile is None:
+                  tiles = _make_tiles(bbox, src_crs, self.min_z, self.max_z)
+              else:
+                  constrained_bbox = list(mercantile.bounds(self.bounding_tile))
+                  tiles = _make_tiles(constrained_bbox, "EPSG:4326", self.min_z, self.max_z)
 
-      if self.bounding_tile is None:
-          tiles = _make_tiles(bbox, src_crs, self.min_z, self.max_z)
-      else:
-          constrained_bbox = list(mercantile.bounds(self.bounding_tile))
-          tiles = _make_tiles(constrained_bbox, "EPSG:4326", self.min_z, self.max_z)
+              tile_batches = self._chunk_iterable(tiles, batch_size)
 
-      tile_batches = self._chunk_iterable(tiles, batch_size)
+              with self.db:
+                 # populate metadata with required fields
+                  self.db.add_metadata({
+                      "format": self.image_format,
+                      "name": "",
+                      "description": "",
+                      "version": "1",
+                      "type": "baselayer"
+                  })
 
-      with self.db:
-         # populate metadata with required fields
-          self.db.add_metadata({
-              "format": self.image_format,
-              "name": "",
-              "description": "",
-              "version": "1",
-              "type": "baselayer"
-          })
+                  for batch in tile_batches:
+                      logging.info(f"Processing batch of {len(batch)} tiles.")
+                      
+                      
+                      for _ in self.pool.imap_unordered(self.run_function, batch):
+                          pass
 
-          for batch in tile_batches:
-              logging.info(f"Processing batch of {len(batch)} tiles.")
-              
-              
-              for _ in self.pool.imap_unordered(self.run_function, batch):
-                  pass
+                      while not worker_queue_holder.empty():
+                          tile, contents = worker_queue_holder.get()
+                          self.db.insert_tile(tile, contents)
 
-              while not worker_queue_holder.empty():
-                  tile, contents = worker_queue_holder.get()
-                  self.db.insert_tile(tile, contents)
+                      self.db.conn.commit()
 
-              self.db.conn.commit()
+              self.pool.close()
+              self.pool.join()
 
-      self.pool.close()
-      self.pool.join()
+          _run_pool()
       return None
 
     def _chunk_iterable(self, iterable, chunk_size):
