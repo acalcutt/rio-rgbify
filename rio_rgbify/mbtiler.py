@@ -273,59 +273,60 @@ class RGBTiler:
 
 
     def run(self, processes=4, batch_size=500):
-      """
-      Warp, encode, and tile, processing in batches.
-      """
-      with rasterio.open(self.inpath) as src:
-          bbox = list(src.bounds)
-          src_crs = src.crs
+        """
+        Warp, encode, and tile, processing in batches.
+        """
+        with rasterio.open(self.inpath) as src:
+            bbox = list(src.bounds)
+            src_crs = src.crs
 
-      self.db.add_metadata({
-          "format": self.image_format,
-          "name": "",
-          "description": "",
-          "version": "1",
-          "type": "baselayer"
-      })
+        if processes == 1:
+            self.pool = MockTub(
+                _main_worker, (self.inpath, self.run_function, self.global_args)
+            )
+        else:
+            self.pool = Pool(
+                processes,
+                _main_worker,
+                (self.inpath, self.run_function, self.global_args),
+            )
 
-      if processes == 1:
-          self.pool = MockTub(
-              _main_worker, (self.inpath, self.run_function, self.global_args)
-          )
-      else:
-          self.pool = Pool(
-              processes,
-              _main_worker,
-              (self.inpath, self.run_function, self.global_args),
-          )
+        if self.bounding_tile is None:
+            tiles = _make_tiles(bbox, src_crs, self.min_z, self.max_z)
+        else:
+            constrained_bbox = list(mercantile.bounds(self.bounding_tile))
+            tiles = _make_tiles(constrained_bbox, "EPSG:4326", self.min_z, self.max_z)
 
-      if self.bounding_tile is None:
-          tiles = _make_tiles(bbox, src_crs, self.min_z, self.max_z)
-      else:
-          constrained_bbox = list(mercantile.bounds(self.bounding_tile))
-          tiles = _make_tiles(constrained_bbox, "EPSG:4326", self.min_z, self.max_z)
+        tile_batches = self._chunk_iterable(tiles, batch_size)
 
-      tile_batches = self._chunk_iterable(tiles, batch_size)
+        with self.db:
+           # populate metadata with required fields
+            self.db.add_metadata({
+                "format": self.image_format,
+                "name": "",
+                "description": "",
+                "version": "1",
+                "type": "baselayer"
+            })
+
+            for batch in tile_batches:
+                logging.info(f"Processing batch of {len(batch)} tiles.")
+                result_queue = Queue()
+                tile_and_queue = [(tile, result_queue) for tile in batch]
 
 
-      for batch in tile_batches:
-          logging.info(f"Processing batch of {len(batch)} tiles.")
-          result_queue = Queue()
-          tile_and_queue = [(tile, result_queue) for tile in batch]
-          
-          
-          for _ in self.pool.imap_unordered(self.run_function, tile_and_queue):
-              pass
+                for _ in self.pool.imap_unordered(self.run_function, tile_and_queue):
+                    pass
 
-          while not result_queue.empty():
-            tile, contents = result_queue.get()
-            self.db.insert_tile(tile, contents)
+                while not result_queue.empty():
+                  tile, contents = result_queue.get()
+                  self.db.insert_tile(tile, contents)
 
-          self.db.conn.commit()  
-          
-      self.pool.close()
-      self.pool.join()
-      return None
+                self.db.conn.commit()
+
+        self.pool.close()
+        self.pool.join()
+        return None
 
     def _chunk_iterable(self, iterable, chunk_size):
         """Helper to yield successive chunks from an iterable."""
