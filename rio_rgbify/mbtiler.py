@@ -7,7 +7,7 @@ import itertools
 import mercantile
 import rasterio
 import numpy as np
-from multiprocessing import Pool, Queue, Manager
+from multiprocessing import Pool, Queue, Manager, get_context
 import os
 from rasterio._io import virtual_file_to_buffer
 from riomucho.single_process_pool import MockTub
@@ -307,13 +307,13 @@ class RGBTiler:
               _main_worker, (self.inpath, self.run_function, self.global_args)
           )
       else:
-          self.pool = Pool(
+        
+          ctx = get_context("fork")
+          self.pool = ctx.Pool(
               processes,
               initializer = _init_worker,
               initargs = (_main_worker, self.inpath, self.run_function, self.global_args),
           )
-
-      
 
       if self.bounding_tile is None:
           tiles = _make_tiles(bbox, src_crs, self.min_z, self.max_z)
