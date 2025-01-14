@@ -231,6 +231,8 @@ class ImageEncoder:
     @staticmethod
     def save_rgb_to_bytes(rgb_data: np.ndarray, output_image_format: ImageFormat, default_tile_size: int = 512) -> bytes:
         print(f"save_rgb_to_bytes called with rgb data shape {rgb_data.shape}")
+        print(f"Requested format: {output_image_format}, type: {type(output_image_format)}")  # Debug the format
+        print(f"Comparison with WEBP: {output_image_format == ImageFormat.WEBP}")  # Debug the comparison
         
         if rgb_data.size == 0:
             print("rgb_data size is 0")
