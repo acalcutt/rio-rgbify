@@ -31,7 +31,7 @@ def process_tile(inpath, encoding, interval, base_val, round_digits, resampling,
     logging.info(f"Processing tile {tile} on CPU {proc.cpu_num()} (PID: {os.getpid()})")
     
     try:
-        with rasterio.open(inpath) as src:
+        with rasterio.open(inpath) as src: # Open the dataset in the worker process
             x, y, z = tile
 
             bounds = [
@@ -44,6 +44,7 @@ def process_tile(inpath, encoding, interval, base_val, round_digits, resampling,
 
             toaffine = transform.from_bounds(*bounds + [512, 512])
             out = np.empty((512, 512), dtype=src.meta["dtype"])
+            print(f"out: {out}")
 
             reproject(
                 rasterio.band(src, 1),
