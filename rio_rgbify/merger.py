@@ -360,11 +360,15 @@ class TerrainRGBMerger:
                 base_val=-10000,
                 quantized_alpha=self.output_quantized_alpha if self.output_encoding == EncodingType.TERRARIUM else False
             )
-            image_bytes = ImageEncoder.save_rgb_to_bytes(rgb_data, self.output_image_format, self.default_tile_size)
+
+            try:
+                image_bytes = ImageEncoder.save_rgb_to_bytes(rgb_data, ImageFormat.WEBP)
+                print(f"image_bytes {len(image_bytes)}")
+                write_queue.put((tile, image_bytes))
+                self.logger.info(f"Successfully processed tile {tile.z}/{tile.x}/{tile.y}")
+            except Exception as e:
+                logging.error(f"Error encoding image: {e}")
             
-            print(f"image_bytes {len(image_bytes)}")
-            write_queue.put((tile, image_bytes))
-            self.logger.info(f"Successfully processed tile {tile.z}/{tile.x}/{tile.y}")
         except Exception as e:
             self.logger.error(f"Error processing tile {tile.z}/{tile.x}/{tile.y}: {e}")
             raise

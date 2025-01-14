@@ -11,7 +11,6 @@ class ImageFormat(Enum):
     PNG = "png"
     WEBP = "webp"
 
-
 class ImageEncoder:
 
     @staticmethod
@@ -230,51 +229,24 @@ class ImageEncoder:
         return contents
 
     @staticmethod
-    def save_rgb_to_bytes(rgb_data: np.ndarray, output_image_format: "ImageFormat", default_tile_size: int = 512) -> bytes:
+    def save_rgb_to_bytes(rgb_data: np.ndarray, output_image_format: ImageFormat, default_tile_size: int = 512) -> bytes:
         """
         Converts a numpy array to the specified image format
-        """
-        """
-        Debug helper to validate RGB data conversion process
-        """
-        print("\nDEBUG RGB Conversion:")
-        print(f"1. Input RGB Data:")
-        print(f"   Shape: {rgb_data.shape}")
-        print(f"   Dtype: {rgb_data.dtype}")
-        print(f"   Value range: [{rgb_data.min()}, {rgb_data.max()}]")
         
-        # Check for NaN or inf values
-        if np.isnan(rgb_data).any() or np.isinf(rgb_data).any():
-            print("   WARNING: Data contains NaN or inf values!")
-        
-        # Validate data is in correct range for uint8
-        if rgb_data.dtype != np.uint8:
-            if rgb_data.max() > 255 or rgb_data.min() < 0:
-                print("   WARNING: Data contains values outside uint8 range!")
-        
-        try:
-            # Test the array movement and conversion
-            moved_array = np.moveaxis(rgb_data, 0, -1)
-            print(f"\n2. After moveaxis:")
-            print(f"   New shape: {moved_array.shape}")
+        Parameters
+        ----------
+        rgb_data: np.ndarray
+            a (3 x height x width) or (4 x height x width) ndarray with the RGB values
+        output_image_format: ImageFormat
+            the format that the array should be encoded to
+        default_tile_size: int
+            The tile size of the image to create
             
-            # Try creating the image
-            if rgb_data.ndim == 3:
-                mode = 'RGB'
-            elif rgb_data.ndim == 4:
-                mode = 'RGBA'
-            else:
-                raise ValueError(f"Unexpected number of dimensions: {rgb_data.ndim}")
-                
-            image = Image.fromarray(moved_array.astype(np.uint8), mode)
-            print(f"\n3. PIL Image created successfully:")
-            print(f"   Mode: {image.mode}")
-            print(f"   Size: {image.size}")
-            
-        except Exception as e:
-            print(f"\nERROR during conversion: {str(e)}")
-
-        
+        Returns
+        -------
+        bytes:
+            bytes for an image encoded to the given output format
+        """
         print(f"save_rgb_to_bytes called with rgb data shape {rgb_data.shape}")
         
         if rgb_data.size == 0:
@@ -282,28 +254,29 @@ class ImageEncoder:
             return bytes()
             
         try:
-            # Ensure data is in uint8 range
-            if rgb_data.dtype != np.uint8:
-                rgb_data = np.clip(rgb_data, 0, 255).astype(np.uint8)
-                
-            # Validate dimensions
-            if rgb_data.ndim not in [3, 4]:
-                raise ValueError(f"Expected 3 or 4 dimensions, got {rgb_data.ndim}")
-                
-            # Create image
-            mode = 'RGBA' if rgb_data.ndim == 4 else 'RGB'
-            image = Image.fromarray(np.moveaxis(rgb_data, 0, -1), mode)
+            # Validate dimensions and create image
+            if rgb_data.ndim == 3:
+                image = Image.fromarray(np.moveaxis(rgb_data, 0, -1).astype(np.uint8), 'RGB')
+            elif rgb_data.ndim == 4:
+                image = Image.fromarray(np.moveaxis(rgb_data, 0, -1).astype(np.uint8), 'RGBA')
+            else:
+                tile_size = default_tile_size
+                image = Image.fromarray(np.moveaxis(np.zeros((3,tile_size,tile_size), dtype=np.uint8), 0, -1), 'RGB')
             
-            # Save to bytes
+            print(f"image created with shape: {np.array(image).shape}")
+            
+            # Save to bytes using the enum value
             with BytesIO() as f:
                 if output_image_format == ImageFormat.PNG:
                     image.save(f, format='PNG')
                 elif output_image_format == ImageFormat.WEBP:
                     image.save(f, format='WEBP', lossless=True)
-                else:
-                    raise ValueError(f"Unsupported format: {output_image_format}")
-                return bytes(f.getvalue())
+                image_bytes = bytearray(f.getvalue())
+                
+            print(f"image_bytes size {len(image_bytes)}")
+            return bytes(image_bytes)
                 
         except Exception as e:
             logging.error(f"Failed to encode image: {e}")
-            raise  # Re-raise the exception for better error handling
+            # Re-raise the exception for better error handling
+            raise
