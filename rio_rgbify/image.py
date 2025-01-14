@@ -42,7 +42,7 @@ class ImageEncoder:
             a uint8 (3 x rows x cols) or (4 x rows x cols) ndarray with the
             data encoded
         """
-        print(f"data_to_rgb called with shape: {data.shape}, encoding: {encoding}, interval: {interval}, base_val: {base_val}, round_digits: {round_digits}, quantized_alpha: {quantized_alpha}")
+        logging.debug(f"data_to_rgb called with shape: {data.shape}, encoding: {encoding}, interval: {interval}, base_val: {base_val}, round_digits: {round_digits}, quantized_alpha: {quantized_alpha}")
         if not isinstance(data, np.ndarray):
             raise ValueError("Input data must be a numpy array")
 
@@ -164,70 +164,48 @@ class ImageEncoder:
         return table
 
     @staticmethod
-    def encode_as_webp(data, kwargs, transform):
-        print(f"data: {data}")
-        """
-        Encodes input `data` as a WebP byte array
-
-        Parameters
-        -----------
-        data: np.array
-            input raster data
-
-        kwargs: dict
-            keyword arguments to pass to the `rasterio.open` call
-        transform: transform
-            the affine transform of the image
-
-        Returns
-        --------
-        buffer: bytearray
-            WebP encoded bytearray
-        """
-        with BytesIO() as f:
-           if data.ndim == 2:
-              im = Image.fromarray(data.astype("uint8"), mode="L")
-           elif data.ndim == 3:
-              im = Image.fromarray(np.moveaxis(data, 0, -1).astype("uint8"))
-           elif data.ndim == 4:
-              im = Image.fromarray(np.moveaxis(data, 0, -1).astype("uint8"), mode='RGBA')
-           else:
-               raise ValueError("unexpected number of image dimensions")
-
-           im.save(f, format="webp", lossless=True, **kwargs)
-           return f.getvalue()
-
+    def encode_as_webp(rgb, kwargs, transform):
+        """Convert and RGB(A) numpy to bytes, force WebP encoding"""
+        logging.debug(f"encode_as_webp called with rgb data shape {rgb.shape}")
+        #Force the RGB to be uint8 for the webp
+        rgb = rgb.astype(np.uint8)
+        
+        if rgb.shape[0] == 3:
+            image = Image.fromarray(np.transpose(rgb, (1, 2, 0)), mode='RGB')
+        elif rgb.shape[0] == 4:
+            image = Image.fromarray(np.transpose(rgb, (1, 2, 0)), mode='RGBA')
+        else:
+            raise ValueError(f"Unsupported number of channels in RGB data: {rgb.shape[0]}")
+        
+        image_bytes = BytesIO()
+        image.save(image_bytes, format="WEBP", lossless=True, **kwargs)
+        image_bytes.seek(0)
+      
+        with rasterio.io.MemoryFile(image_bytes.read()) as memfile:
+            with memfile.open(driver="WEBP") as dataset:
+                return memfile.read()
+    
     @staticmethod
-    def encode_as_png(data, profile, dst_transform):
-        """
-        Uses rasterio's virtual file system to encode a (3 or 4, height, width)
-        array as a png-encoded bytearray.
-
-        Parameters
-        ----------
-        data: ndarray
-            (3 or 4 x height x width) uint8 RGB array
-        profile: dictionary
-            dictionary of kwargs for png writing
-        dst_transform: Affine
-            affine transform for output tile
-
-        Returns
-        --------
-        contents: bytearray
-            png-encoded bytearray of the provided input data
-        """
-        profile = profile.copy()  # Create copy to avoid modifying input
-        profile["affine"] = dst_transform
-        with rasterio.open("/vsimem/tileimg", "w", **profile) as dst:
-            if data.ndim == 3:
-                dst.write(data)
-            elif data.ndim == 4:
-                dst.write(np.moveaxis(data, 0, -1))
-            else:
-                raise ValueError(f"Unexpected number of dimensions {data.ndim}")
-        contents = bytearray(virtual_file_to_buffer("/vsimem/tileimg"))
-        return contents
+    def encode_as_png(rgb, kwargs, transform):
+        """Convert and RGB(A) numpy to bytes, force PNG encoding"""
+        logging.debug(f"encode_as_png called with rgb data shape {rgb.shape}")
+        #Force the RGB to be uint8 for the png,
+        rgb = rgb.astype(np.uint8)
+        
+        if rgb.shape[0] == 3:
+            image = Image.fromarray(np.transpose(rgb, (1, 2, 0)), mode='RGB')
+        elif rgb.shape[0] == 4:
+            image = Image.fromarray(np.transpose(rgb, (1, 2, 0)), mode='RGBA')
+        else:
+            raise ValueError(f"Unsupported number of channels in RGB data: {rgb.shape[0]}")
+        
+        image_bytes = BytesIO()
+        image.save(image_bytes, format="PNG", **kwargs)
+        image_bytes.seek(0)
+      
+        with rasterio.io.MemoryFile(image_bytes.read()) as memfile:
+            with memfile.open(driver="PNG") as dataset:
+                return memfile.read()
 
     @staticmethod
     def save_rgb_to_bytes(rgb_data: np.ndarray, output_image_format: str | ImageFormat, default_tile_size: int = 512) -> bytes:
