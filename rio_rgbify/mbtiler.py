@@ -183,9 +183,11 @@ class RGBTiler:
 
     def run(self, processes=None, batch_size=None):
         """Main processing loop with smart process scaling"""
+        print(f"self.inpath {self.inpath}")
         with rasterio.open(self.inpath) as src:
             bbox = list(src.bounds)
             src_crs = src.crs
+            print(f"src_crs1 {src_crs}")
             tiles = list(self._generate_tiles(bbox, src_crs))
 
         total_tiles = len(tiles)
