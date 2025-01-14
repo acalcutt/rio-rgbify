@@ -8,6 +8,7 @@ import mercantile
 import rasterio
 import numpy as np
 from multiprocessing import Pool, Queue, Manager
+import os
 from rasterio._io import virtual_file_to_buffer
 from riomucho.single_process_pool import MockTub
 
@@ -39,10 +40,12 @@ def _init_worker(main_worker, inpath, g_work_func, g_args):
     global work_func
     global global_args
     global src
+    global worker_queue_holder
     work_func = g_work_func
     global_args = g_args
 
     src = rasterio.open(inpath)
+    worker_queue_holder = Manager().Queue()
     
     
 def _main_worker(inpath, g_work_func, g_args):
@@ -71,6 +74,10 @@ def _tile_worker(tile):
         tuple with the input tile, and a bytearray with the data encoded into
         the format created in the `writer_func`
     """
+    global src
+    global global_args
+    global worker_queue_holder
+    logging.info(f"Worker process id is {os.getpid()}")
     x, y, z = tile
 
     bounds = [
@@ -95,7 +102,7 @@ def _tile_worker(tile):
     )
 
     out = ImageEncoder.data_to_rgb(out, global_args["encoding"], global_args["interval"], base_val=global_args["base_val"], round_digits=global_args["round_digits"], quantized_alpha=global_args["quantized_alpha"])  # Use static Encoder method and pass in base_val
-    global worker_queue_holder
+
     worker_queue_holder.put((tile, global_args["writer_func"](out, global_args["kwargs"].copy(), toaffine)))
 
 
@@ -306,7 +313,7 @@ class RGBTiler:
               initargs = (_main_worker, self.inpath, self.run_function, self.global_args),
           )
 
-      _create_worker_queue()
+      
 
       if self.bounding_tile is None:
           tiles = _make_tiles(bbox, src_crs, self.min_z, self.max_z)
