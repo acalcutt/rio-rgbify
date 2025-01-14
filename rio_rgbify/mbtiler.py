@@ -267,7 +267,7 @@ class RGBTiler:
                 " is not a supported resampling method!".format(resampling)
             )
 
-        self.resampling = Resampling(resampling)
+        self.resampling = Resampling[resampling]
         # global kwargs not used if output is webp
         self.global_args = _create_global_args(interval, base_val, round_digits, encoding, writer_func, self.resampling, quantized_alpha)
 
