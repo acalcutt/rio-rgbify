@@ -33,8 +33,6 @@ def process_tile(inpath, encoding, interval, base_val, round_digits, resampling,
     try:
         with rasterio.open(inpath) as src:
             x, y, z = tile
-            print(f"Source crs: {src.crs}")
-            print(f"Source transform: {src.transform}")
 
             bounds = [
                 c for i in (
@@ -47,11 +45,15 @@ def process_tile(inpath, encoding, interval, base_val, round_digits, resampling,
             toaffine = transform.from_bounds(*bounds + [512, 512])
             out = np.empty((512, 512), dtype=src.meta["dtype"])
             
-            # Read the source data directly
-            source_data = src.read(1, window=rasterio.windows.Window(0,0, src.width, src.height))
+            # Calculate the window
+            window = rasterio.windows.from_bounds(*bounds, transform=src.transform)
+            
+            # Read the source data using the window
+            source_data = src.read(1, window=window, out_shape=(512,512), resampling=resampling)
             
             reproject(
                 source=source_data,  # Source data
+                src_transform=rasterio.transform.from_bounds(*bounds, width=512, height=512),
                 src_crs=src.crs,
                 destination=out,
                 dst_transform=toaffine,
@@ -168,12 +170,12 @@ class RGBTiler:
     def _generate_tiles(self, bbox, src_crs):
       
         if self.bounding_tile is None:
-          tiles = mercantile.tiles(
-              *bbox, zooms=range(self.min_z, self.max_z + 1), truncate=False
-          )
+            tiles = mercantile.tiles(
+                *bbox, zooms=range(self.min_z, self.max_z + 1), truncate=False
+            )
         else:
-          constrained_bbox = list(mercantile.bounds(self.bounding_tile))
-          tiles = mercantile.tiles(
+            constrained_bbox = list(mercantile.bounds(self.bounding_tile))
+            tiles = mercantile.tiles(
                 *constrained_bbox, zooms=range(self.min_z, self.max_z + 1), truncate=False
             )
         
