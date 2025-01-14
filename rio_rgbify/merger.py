@@ -5,7 +5,7 @@ from rasterio.warp import reproject, Resampling
 import numpy as np
 import io
 from PIL import Image
-print(Image.PILLOW_VERSION)  # Check Pillow version
+
 print(Image.core.features)   # Check supported features
 import multiprocessing
 from multiprocessing import Pool, Process, Queue
