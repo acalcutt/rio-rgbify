@@ -5,8 +5,11 @@ from rasterio.warp import reproject, Resampling
 import numpy as np
 import io
 from PIL import Image
+from PIL import __version__ as PILLOW_VERSION
+from PIL import features
 
-print(Image.core.features)   # Check supported features
+print(f"Pillow version: {PILLOW_VERSION}")
+print(f"Supported features: {features.get_supported()}")
 import multiprocessing
 from multiprocessing import Pool, Process, Queue
 from pathlib import Path
