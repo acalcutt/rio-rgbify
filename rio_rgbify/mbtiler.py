@@ -35,10 +35,7 @@ def _create_worker_queue():
     global worker_queue_holder
     worker_queue_holder = Manager().Queue()
     
-def _main_worker(inpath, g_work_func, g_args):
-    """
-    Util for setting global vars w/ a Pool
-    """
+def _init_worker(main_worker, inpath, g_work_func, g_args):
     global work_func
     global global_args
     global src
@@ -46,6 +43,14 @@ def _main_worker(inpath, g_work_func, g_args):
     global_args = g_args
 
     src = rasterio.open(inpath)
+    
+    
+def _main_worker(inpath, g_work_func, g_args):
+    """
+    Util for setting global vars w/ a Pool
+    """
+    
+    pass
 
 
 def _tile_worker(tile):
@@ -266,8 +271,9 @@ class RGBTiler:
             raise ValueError(
                 " is not a supported resampling method!".format(resampling)
             )
+        
+        self.resampling = Resampling[resampling.lower()]
 
-        self.resampling = Resampling[resampling]
         # global kwargs not used if output is webp
         self.global_args = _create_global_args(interval, base_val, round_digits, encoding, writer_func, self.resampling, quantized_alpha)
 
@@ -296,9 +302,11 @@ class RGBTiler:
       else:
           self.pool = Pool(
               processes,
-              initializer = _create_worker_queue,
-              initargs = (_main_worker, (self.inpath, self.run_function, self.global_args)),
+              initializer = _init_worker,
+              initargs = (_main_worker, self.inpath, self.run_function, self.global_args),
           )
+
+      _create_worker_queue()
 
       if self.bounding_tile is None:
           tiles = _make_tiles(bbox, src_crs, self.min_z, self.max_z)
