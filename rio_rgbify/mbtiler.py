@@ -33,6 +33,8 @@ def process_tile(inpath, encoding, interval, base_val, round_digits, resampling,
     try:
         with rasterio.open(inpath) as src:
             x, y, z = tile
+            print(f"Source crs: {src.crs}")
+            print(f"Source transform: {src.transform}")
 
             bounds = [
                 c for i in (
