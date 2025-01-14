@@ -49,7 +49,8 @@ def process_tile(inpath, encoding, interval, base_val, round_digits, resampling,
             source_data = src.read(1, window=rasterio.windows.Window(0,0, src.width, src.height))
             
             reproject(
-                source=source_data, # Source data
+                source=source_data,  # Source data
+                src_crs=src.crs,
                 destination=out,
                 dst_transform=toaffine,
                 dst_crs="EPSG:3857",
