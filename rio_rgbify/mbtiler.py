@@ -7,7 +7,7 @@ import itertools
 import mercantile
 import rasterio
 import numpy as np
-from multiprocessing import Pool, Queue, get_context, current_process
+from multiprocessing import Pool, Queue, get_context, current_process, Manager
 import os
 from riomucho.single_process_pool import MockTub
 from io import BytesIO
@@ -19,25 +19,60 @@ from rio_rgbify.database import MBTilesDatabase
 from rio_rgbify.image import ImageEncoder
 import logging
 import signal
+import functools
 
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
 
+def process_tile(inpath, encoding, interval, base_val, round_digits, resampling, quantized_alpha, kwargs, tile):
+    """Standalone tile processing function"""
+    try:
+        with rasterio.open(inpath) as src:
+            x, y, z = tile
+
+            bounds = [
+                c for i in (
+                    mercantile.xy(*mercantile.ul(x, y + 1, z)),
+                    mercantile.xy(*mercantile.ul(x + 1, y, z)),
+                )
+                for c in i
+            ]
+
+            toaffine = transform.from_bounds(*bounds + [512, 512])
+            out = np.empty((512, 512), dtype=src.meta["dtype"])
+
+            reproject(
+                rasterio.band(src, 1),
+                out,
+                dst_transform=toaffine,
+                dst_crs="EPSG:3857",
+                resampling=resampling,
+            )
+
+            out = ImageEncoder.data_to_rgb(
+                out, 
+                encoding, 
+                interval, 
+                base_val=base_val, 
+                round_digits=round_digits,
+                quantized_alpha=quantized_alpha
+            )
+
+            if encoding == "mapbox":
+                writer_func = ImageEncoder.encode_as_png
+            else:
+                writer_func = ImageEncoder.encode_as_webp
+
+            result = writer_func(out, kwargs.copy(), toaffine)
+            return tile, result
+            
+    except Exception as e:
+        logging.error(f"Error processing tile {tile}: {str(e)}")
+        return None
+
 class RGBTiler:
-    def __init__(
-        self,
-        inpath,
-        outpath,
-        min_z,
-        max_z,
-        interval=1,
-        base_val=0,
-        round_digits=0,
-        encoding="mapbox",
-        bounding_tile=None,
-        resampling="bilinear",
-        quantized_alpha=False,
-        **kwargs
-    ):
+    def __init__(self, inpath, outpath, min_z, max_z, interval=1, base_val=0,
+                 round_digits=0, encoding="mapbox", bounding_tile=None,
+                 resampling="bilinear", quantized_alpha=False, **kwargs):
         self.inpath = inpath
         self.outpath = outpath
         self.min_z = min_z
@@ -48,23 +83,16 @@ class RGBTiler:
         self.base_val = base_val
         self.round_digits = round_digits
         self.quantized_alpha = quantized_alpha
-
-        if not "format" in kwargs:
-            self.writer_func = ImageEncoder.encode_as_png
-            self.image_format = "png"
-        elif kwargs["format"].lower() == "png":
-            self.writer_func = ImageEncoder.encode_as_png
-            self.image_format = "png"
-        elif kwargs["format"].lower() == "webp":
-            self.writer_func = ImageEncoder.encode_as_webp
-            self.image_format = "webp"
-        else:
-            raise ValueError(f"{kwargs['format']} is not a supported filetype!")
-
+        
         if resampling not in ["nearest", "bilinear", "cubic", "cubic_spline", "lanczos", "average", "mode", "gauss"]:
             raise ValueError(f"{resampling} is not a supported resampling method!")
         
         self.resampling = Resampling[resampling.lower()]
+        
+        if kwargs.get("format", "png").lower() not in ["png", "webp"]:
+            raise ValueError(f"{kwargs.get('format')} is not a supported filetype!")
+            
+        self.image_format = kwargs.get("format", "png").lower()
         
         self.kwargs = {
             "driver": "PNG",
@@ -75,49 +103,10 @@ class RGBTiler:
             "crs": "EPSG:3857",
         }
 
-    def _process_tile(self, tile_args):
-        """Process a single tile with error handling"""
-        tile, input_path = tile_args
-        try:
-            with rasterio.open(input_path) as src:
-                x, y, z = tile
-
-                bounds = [
-                    c for i in (
-                        mercantile.xy(*mercantile.ul(x, y + 1, z)),
-                        mercantile.xy(*mercantile.ul(x + 1, y, z)),
-                    )
-                    for c in i
-                ]
-
-                toaffine = transform.from_bounds(*bounds + [512, 512])
-                out = np.empty((512, 512), dtype=src.meta["dtype"])
-
-                reproject(
-                    rasterio.band(src, 1),
-                    out,
-                    dst_transform=toaffine,
-                    dst_crs="EPSG:3857",
-                    resampling=self.resampling,
-                )
-
-                out = ImageEncoder.data_to_rgb(
-                    out, 
-                    self.encoding, 
-                    self.interval, 
-                    base_val=self.base_val, 
-                    round_digits=self.round_digits,
-                    quantized_alpha=self.quantized_alpha
-                )
-
-                return tile, self.writer_func(out, self.kwargs.copy(), toaffine)
-        except Exception as e:
-            logging.error(f"Error processing tile {tile}: {str(e)}")
-            return None
-
     def _init_worker(self):
         """Initialize worker process"""
         signal.signal(signal.SIGINT, signal.SIG_IGN)
+        os.environ['RASTERIO_NUM_THREADS'] = '1'
         logging.info(f"Initialized worker process {current_process().name}")
 
     def _generate_tiles(self, bbox, src_crs):
@@ -143,59 +132,81 @@ class RGBTiler:
             ):
                 yield [x, y, z]
 
-    def _chunk_tiles(self, tiles, chunk_size):
-        """Chunk tiles into batches"""
-        chunk = []
-        for tile in tiles:
-            chunk.append(tile)
-            if len(chunk) >= chunk_size:
-                yield chunk
-                chunk = []
-        if chunk:
-            yield chunk
-
     def run(self, processes=4, batch_size=500):
-        """Main processing loop with improved error handling and resource management"""
+        """Main processing loop"""
         if processes < 1:
             raise ValueError("Number of processes must be at least 1")
 
         with rasterio.open(self.inpath) as src:
             bbox = list(src.bounds)
             src_crs = src.crs
+            tiles = list(self._generate_tiles(bbox, src_crs))
 
         if processes == 1:
-            with rasterio.open(self.inpath) as src:
-                with self.db:
-                    self._init_db()
-                    for tile in self._generate_tiles(bbox, src_crs):
-                        result = self._process_tile((tile, self.inpath))
-                        if result:
-                            self.db.insert_tile(*result)
-                    self.db.conn.commit()
+            with self.db:
+                self.db.add_metadata({
+                    "format": self.image_format,
+                    "name": "",
+                    "description": "",
+                    "version": "1",
+                    "type": "baselayer"
+                })
+                
+                for tile in tiles:
+                    result = process_tile(
+                        self.inpath,
+                        self.encoding,
+                        self.interval,
+                        self.base_val,
+                        self.round_digits,
+                        self.resampling,
+                        self.quantized_alpha,
+                        self.kwargs,
+                        tile
+                    )
+                    if result:
+                        self.db.insert_tile(*result)
+                self.db.conn.commit()
             return
 
         # Multiprocessing implementation
         ctx = get_context("fork")
-        os.environ['RASTERIO_NUM_THREADS'] = '1'
+        
+        # Create a partial function with all the constant arguments
+        process_func = functools.partial(
+            process_tile,
+            self.inpath,
+            self.encoding,
+            self.interval,
+            self.base_val,
+            self.round_digits,
+            self.resampling,
+            self.quantized_alpha,
+            self.kwargs
+        )
 
         with self.db:
-            self._init_db()
+            self.db.add_metadata({
+                "format": self.image_format,
+                "name": "",
+                "description": "",
+                "version": "1",
+                "type": "baselayer"
+            })
             
             with ctx.Pool(processes, initializer=self._init_worker) as pool:
                 try:
-                    tiles = list(self._generate_tiles(bbox, src_crs))
-                    for chunk in self._chunk_tiles(tiles, batch_size):
-                        # Create tile_data without database connection
-                        tile_data = [(tile, self.inpath) for tile in chunk]
+                    # Process tiles in batches
+                    for i in range(0, len(tiles), batch_size):
+                        batch = tiles[i:i + batch_size]
+                        results = pool.map(process_func, batch)
                         
-                        results = pool.map(self._process_tile, tile_data)
-                        
-                        # Process results and insert into database in main process
+                        # Handle results in main process
                         for result in filter(None, results):
                             self.db.insert_tile(*result)
                         
                         self.db.conn.commit()
-                        logging.info(f"Processed batch of {len(chunk)} tiles")
+                        logging.info(f"Processed batch of {len(batch)} tiles")
                 
                 except KeyboardInterrupt:
                     logging.info("Caught KeyboardInterrupt, terminating workers")
@@ -208,16 +219,6 @@ class RGBTiler:
                 finally:
                     pool.close()
                     pool.join()
-
-    def _init_db(self):
-        """Initialize database with metadata"""
-        self.db.add_metadata({
-            "format": self.image_format,
-            "name": "",
-            "description": "",
-            "version": "1",
-            "type": "baselayer"
-        })
 
     def __enter__(self):
         self.db = MBTilesDatabase(self.outpath)
