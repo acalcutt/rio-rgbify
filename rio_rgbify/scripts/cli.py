@@ -202,7 +202,7 @@ def merge(config, workers, verbose):
             height_adjustment=float(source_data.get("height_adjustment", 0.0)),
             base_val=float(source_data.get("base_val",-10000)),
             interval=float(source_data.get("interval",0.1)),
-            mask_values = config_data.get("mask_values",[0.0, -1.0])
+            mask_values = source_data.get("mask_values",[0.0])
         )
         source_connections[source.path] = sqlite3.connect(source.path)
         sources.append(source)
@@ -218,6 +218,7 @@ def merge(config, workers, verbose):
     min_zoom = config_data.get("min_zoom", 0)
     max_zoom = config_data.get("max_zoom", None)
     bounds = config_data.get("bounds", None)
+    gaussian_blur_sigma = config_data.get("gaussian_blur_sigma", 0.8)
     
     if bounds is not None:
       try:
@@ -240,6 +241,7 @@ def merge(config, workers, verbose):
         min_zoom = min_zoom,
         max_zoom = max_zoom,
         bounds = bounds,
+        gaussian_blur_sigma = gaussian_blur_sigma,
     )
     
     try:

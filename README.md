@@ -44,17 +44,17 @@ Usage: rio rgbify rgbify [OPTIONS] SRC_PATH DST_PATH
 
 Options:
     -b, --base-val FLOAT         The base value of which to base the output
-                                  encoding on (Mapbox only) [DEFAULT=0]
+                                 encoding on (Mapbox only) [DEFAULT=0]
     -i, --interval FLOAT         Describes the precision of the output, by
-                                  incrementing interval (Mapbox only) [DEFAULT=1]
-    -r, --round-digits INTEGER    Less significants encoded bits to be set to
-                                  0. Round the values, but have better images
-                                  compression [DEFAULT=0]
+                                 incrementing interval (Mapbox only) [DEFAULT=1]
+    -r, --round-digits INTEGER   Less significants encoded bits to be set to
+                                 0. Round the values, but have better images
+                                 compression [DEFAULT=0]
     -e, --encoding [mapbox|terrarium]   RGB encoding to use on the tiles
     --bidx INTEGER              Band to encode [DEFAULT=1]
     --max-z INTEGER             Maximum zoom to tile
     --bounding-tile TEXT        Bounding tile '[{x}, {y}, {z}]' to limit
-                                  output tiles
+                                 output tiles
     --min-z INTEGER             Minimum zoom to tile
     --format [png|webp]         Output tile format
     --resampling [nearest|bilinear|cubic|cubic_spline|lanczos|average|mode|gauss] Output tile resampling method
@@ -62,8 +62,8 @@ Options:
     -j, --workers INTEGER        Workers to run [DEFAULT=4]
     -v, --verbose
     --co, --profile NAME=VALUE   Driver specific creation options. See the
-                                  documentation for the selected output driver
-                                  for more information.
+                                 documentation for the selected output driver
+                                 for more information.
     --help                      Show this message and exit.
 ```
 
@@ -87,10 +87,10 @@ The `merge` command is used to merge multiple MBTiles files into one output MBTi
 Usage: rio rgbify merge [OPTIONS]
 
 Options:
-  -c, --config PATH     Path to the JSON configuration file  [required]
-  -j, --workers INTEGER    Workers to run [DEFAULT=4]
-    -v, --verbose
-  --help                  Show this message and exit.
+  -c, --config PATH  Path to the JSON configuration file  [required]
+  -j, --workers INTEGER     Workers to run [DEFAULT=4]
+  -v, --verbose
+  --help              Show this message and exit.
 ```
 
 #### Configuration File
@@ -99,34 +99,35 @@ The `merge` command makes use of a json configuration file which should be passe
 
 ```json
 {
-  "sources": [
-    {
-      "path": "/path/to/bathymetry.mbtiles",
-      "encoding": "mapbox",
-      "height_adjustment": -5.0
-    },
-    {
-      "path": "/path/to/base_terrain.mbtiles",
-      "encoding": "mapbox",
-      "height_adjustment": 0.0,
-      "base_val": -10000,
-      "interval": 0.1,
-      "mask_values": [-1,0]
-    },
-    {
-      "path": "/path/to/secondary_terrain.mbtiles",
-      "encoding": "terrarium",
-      "height_adjustment": 10.0
-    }
-  ],
-  "output_path": "/path/to/output.mbtiles",
-  "output_encoding": "mapbox",
-  "output_format": "webp",
-  "resampling": "bilinear",
-  "output_quantized_alpha": true,
-  "min_zoom": 2,
-  "max_zoom": 10,
-  "bounds": [-10,10,20,50]
+    "sources": [
+        {
+            "path": "/path/to/bathymetry.mbtiles",
+            "encoding": "mapbox",
+            "height_adjustment": -5.0
+        },
+        {
+            "path": "/path/to/base_terrain.mbtiles",
+            "encoding": "mapbox",
+            "height_adjustment": 0.0,
+            "base_val": -10000,
+            "interval": 0.1,
+            "mask_values": [-1,0]
+        },
+        {
+            "path": "/path/to/secondary_terrain.mbtiles",
+            "encoding": "terrarium",
+            "height_adjustment": 10.0
+        }
+    ],
+    "output_path": "/path/to/output.mbtiles",
+    "output_encoding": "mapbox",
+    "output_format": "webp",
+    "resampling": "bilinear",
+    "output_quantized_alpha": true,
+    "min_zoom": 2,
+    "max_zoom": 10,
+    "bounds": [-10,10,20,50],
+    "gaussian_blur_sigma": 0.8
 }
 ```
 
@@ -139,7 +140,7 @@ The `merge` command makes use of a json configuration file which should be passe
     *   `height_adjustment` (Optional, Default: `0.0`): A floating-point value (in meters) to adjust the elevation of that particular input. Positive values raise the elevation, and negative values lower the elevation.
     *   `base_val` (Optional, Default: `-10000`): A floating-point value which will be the base value for mapbox encoded tiles, in meters.
     *   `interval` (Optional, Default: `0.1`): A floating-point value that represents the vertical distance between each level of encoded height.
-    * `mask_values` (Optional, Default `[0.0, -1.0]`): A list of numbers representing the elevation values to mask.
+    *   `mask_values` (Optional, Default `[0.0, -1.0]`): A list of numbers representing the elevation values to mask.
 *   `output_path` (Optional, Default: `"output.mbtiles"`): The output path for the merged MBTiles file.
 *   `output_encoding` (Optional, Default: `"mapbox"`): The output encoding to use (`"mapbox"` or `"terrarium"`).
 *   `output_format` (Optional, Default: `"png"`): The output image format (`"png"` or `"webp"`).
@@ -148,6 +149,23 @@ The `merge` command makes use of a json configuration file which should be passe
 *   `min_zoom` (Optional, Default: `0`): The minimum zoom level to process.
 *   `max_zoom` (Optional, Default: uses max from last file): The maximum zoom level to process.
 *   `bounds` (Optional, Default: bounds of last file): A bounding box to limit the tiles being generated. Should be in the format: `[w,s,e,n]`
+*   `gaussian_blur_sigma` (Optional, Default: `0.8`): A floating-point value that controls the strength of the gaussian blur applied to source tiles during upscaling. 
+
+    **Choosing a `gaussian_blur_sigma` Value:**
+
+    The `gaussian_blur_sigma` parameter controls the amount of blurring applied to tiles when they are upscaled during the merge process. It's important to understand that there isn't a single "best" value; it depends on your source data and desired visual outcome. Here's a general guideline:
+
+    *   **Lower values (e.g., 0.5 or less):** Apply very little blurring. This may be suitable if your source data is already relatively smooth or if you want to preserve fine details, but it will not address the "bumpy" appearance of upscaled data.
+    *   **Medium values (e.g., 0.8 to 1.5):** Provide a good balance between smoothing and detail preservation. This is a good starting point and will help reduce the "bumpy" effect when upscaling lower-resolution tiles. The default value of `0.8` is a good choice for many cases.
+    *   **Higher values (e.g., 2.0 or more):** Apply more aggressive blurring, which smooths out the data significantly. This may be appropriate if your source data is very noisy or if you want a very smooth, generalized look, but may obscure some details in the process.
+
+    **How to Choose:**
+    *   **Start with the default (`0.8`):** This is a good starting point for many datasets.
+    *   **Experiment:** Generate a few test merges with different values (e.g. 0.5, 1.0, 1.5, and possibly 2.0) and examine the results visually.
+    *   **Consider your data:** If your source data is already smooth, you might need lower values. If it's noisy or has high-frequency details, higher values might be better.
+    *   **Prioritize your visual needs:** Do you want to see fine details in the terrain, or are you more concerned about eliminating the "bumpy" appearance?
+
+    Ultimately, the right value is the one that produces the visual results that are best for your specific use case. 
 
 The merge logic works by merging the input sources in order, applying the height adjustment as it merges. The last input source will be the base layer for tiles, and the bounds of this last file will be used if no bounds are passed in.
 

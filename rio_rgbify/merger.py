@@ -23,6 +23,7 @@ from rio_rgbify.database import MBTilesDatabase
 from rio_rgbify.image import ImageFormat, ImageEncoder
 from queue import Queue
 import functools
+from scipy.ndimage import gaussian_filter # Import gaussian filter
 
 class EncodingType(Enum):
     MAPBOX = "mapbox"
@@ -58,7 +59,7 @@ class TerrainRGBMerger:
     def __init__(self, sources, output_path, output_encoding=EncodingType.MAPBOX,
                  resampling=Resampling.lanczos, processes=None, default_tile_size=512,
                  output_image_format=ImageFormat.PNG, output_quantized_alpha=False,
-                 min_zoom=0, max_zoom=None, bounds=None):
+                 min_zoom=0, max_zoom=None, bounds=None, gaussian_blur_sigma=0.8): # Add gaussian_blur_sigma
         self.sources = sources
         self.output_path = Path(output_path)
         self.output_encoding = output_encoding
@@ -72,6 +73,7 @@ class TerrainRGBMerger:
         self.max_zoom = max_zoom
         self.bounds = bounds
         self.write_queue = Queue()
+        self.gaussian_blur_sigma = gaussian_blur_sigma # Store the sigma for gaussian blur
         """
         Initializes the TerrainRGBMerger.
 
@@ -92,14 +94,15 @@ class TerrainRGBMerger:
         output_image_format : ImageFormat, optional
             The output image format of the tiles. Defaults to ImageFormat.PNG
         output_quantized_alpha : bool, optional
-        If set to true and using terrarium output encoding, the alpha channel will be populated with quantized data
+            If set to true and using terrarium output encoding, the alpha channel will be populated with quantized data
         min_zoom : int, optional
             The minimum zoom level to process tiles, defaults to 0.
         max_zoom : Optional[int], optional
             The maximum zoom level to process tiles, if None, we use the maximum available, defaults to None.
         bounds : Optional[List[float]], optional
             The bounding box to limit the tiles being generated, defaults to None. If None, the bounds of the last source will be used.
-        
+        gaussian_blur_sigma: float
+            The sigma value to use for the gaussian blur filter, defaults to 0.8
         """
         print(f"__init__ called")
         self.sources = sources
@@ -163,7 +166,7 @@ class TerrainRGBMerger:
 
                 elevation = ImageEncoder._decode(rgb, source.base_val, source.interval, encoding.value) # Use the static decode method from the encoder
                 if source_index > 0:
-                  elevation = ImageEncoder._mask_elevation(elevation, source.mask_values)
+                    elevation = ImageEncoder._mask_elevation(elevation, source.mask_values)
 
                 #Apply height adjustment
                 elevation += source.height_adjustment
@@ -245,7 +248,7 @@ class TerrainRGBMerger:
         """Merge tiles from multiple sources, handling upscaling and priorities"""
         #print(f"_merge_tiles called with tile_datas: {tile_datas}, target_tile: {target_tile}")
         if not any(tile_datas):
-          return None
+            return None
         
         bounds = mercantile.bounds(target_tile)
         
@@ -255,9 +258,9 @@ class TerrainRGBMerger:
             tile_size = tile_datas[0].meta['width']
             
         target_transform = rasterio.transform.from_bounds(
-          bounds.west, bounds.south, bounds.east, bounds.north,
-          tile_size, tile_size
-          )
+            bounds.west, bounds.south, bounds.east, bounds.north,
+            tile_size, tile_size
+        )
         
         result = None
 
@@ -273,7 +276,7 @@ class TerrainRGBMerger:
                     mask = ~np.isnan(resampled_data)
                     if np.any(mask):
                         result[mask] = resampled_data[mask]
-                
+                    
         return result
 
     def _resample_if_needed(self, tile_data: TileData, target_tile: mercantile.Tile, target_transform, tile_size) -> np.ndarray:
@@ -281,49 +284,51 @@ class TerrainRGBMerger:
         #print(f"_resample_if_needed called with tile_data: {tile_data}, target_tile: {target_tile}")
         if tile_data.source_zoom != target_tile.z:
 
-          source_tile = mercantile.Tile(x=target_tile.x // (2**(target_tile.z - tile_data.source_zoom)),
-                                        y=target_tile.y // (2**(target_tile.z - tile_data.source_zoom)),
-                                        z=tile_data.source_zoom
-                                        )
-          source_bounds = mercantile.bounds(source_tile)
+            source_tile = mercantile.Tile(x=target_tile.x // (2**(target_tile.z - tile_data.source_zoom)),
+                                         y=target_tile.y // (2**(target_tile.z - tile_data.source_zoom)),
+                                         z=tile_data.source_zoom
+                                         )
+            source_bounds = mercantile.bounds(source_tile)
 
-          
-          
-          x_offset = (target_tile.x % (2**(target_tile.z - tile_data.source_zoom)))
-          y_offset = (target_tile.y % (2**(target_tile.z - tile_data.source_zoom)))
-          
-          #Determine the sub region bounds.
-          sub_region_width = (source_bounds.east - source_bounds.west) / (2**(target_tile.z - tile_data.source_zoom))
-          sub_region_height = (source_bounds.north - source_bounds.south) / (2**(target_tile.z - tile_data.source_zoom))
+            
+            
+            x_offset = (target_tile.x % (2**(target_tile.z - tile_data.source_zoom)))
+            y_offset = (target_tile.y % (2**(target_tile.z - tile_data.source_zoom)))
+            
+            #Determine the sub region bounds.
+            sub_region_width = (source_bounds.east - source_bounds.west) / (2**(target_tile.z - tile_data.source_zoom))
+            sub_region_height = (source_bounds.north - source_bounds.south) / (2**(target_tile.z - tile_data.source_zoom))
 
-          sub_region_west = source_bounds.west + (x_offset * sub_region_width)
-          sub_region_south = source_bounds.south + (y_offset * sub_region_height)
-          sub_region_east = sub_region_west + sub_region_width
-          sub_region_north = sub_region_south + sub_region_height
+            sub_region_west = source_bounds.west + (x_offset * sub_region_width)
+            sub_region_south = source_bounds.south + (y_offset * sub_region_height)
+            sub_region_east = sub_region_west + sub_region_width
+            sub_region_north = sub_region_south + sub_region_height
 
-          sub_region_transform = rasterio.transform.from_bounds(sub_region_west, sub_region_south, sub_region_east, sub_region_north, tile_size, tile_size)
-          
-          with rasterio.io.MemoryFile() as memfile:
-            with memfile.open(**tile_data.meta) as src:
-              dst_data = np.zeros((1, tile_size, tile_size), dtype=np.float32)
-              reproject(
-                  source=tile_data.data,
-                  destination=dst_data,
-                  src_transform=tile_data.meta['transform'],
-                  src_crs=tile_data.meta['crs'],
-                  dst_transform=sub_region_transform,
-                  dst_crs=tile_data.meta['crs'],
-                  resampling=self.resampling
-              )
+            sub_region_transform = rasterio.transform.from_bounds(sub_region_west, sub_region_south, sub_region_east, sub_region_north, tile_size, tile_size)
+            
+            with rasterio.io.MemoryFile() as memfile:
+                with memfile.open(**tile_data.meta) as src:
+                    # Apply Gaussian blur to source data before reprojection
+                    blurred_data = gaussian_filter(tile_data.data, sigma=self.gaussian_blur_sigma)
+                    dst_data = np.zeros((1, tile_size, tile_size), dtype=np.float32)
+                    reproject(
+                        source=blurred_data,
+                        destination=dst_data,
+                        src_transform=tile_data.meta['transform'],
+                        src_crs=tile_data.meta['crs'],
+                        dst_transform=sub_region_transform,
+                        dst_crs=tile_data.meta['crs'],
+                        resampling=self.resampling
+                    )
 
-              if dst_data.ndim == 3:
-                  return dst_data[0]
-              else:
-                  return dst_data
+                    if dst_data.ndim == 3:
+                        return dst_data[0]
+                    else:
+                        return dst_data
         if tile_data.data.ndim == 3:
-           return tile_data.data[0]
+            return tile_data.data[0]
         else:
-           return tile_data.data
+            return tile_data.data
 
     def process_tile(self, tile: mercantile.Tile, source_conns: Dict[Path, sqlite3.Connection], write_queue: Queue) -> None:
         """Process a single tile, merging data from multiple sources"""
@@ -342,8 +347,8 @@ class TerrainRGBMerger:
             merged_elevation = self._merge_tiles(tile_datas, tile)
             
             if merged_elevation is None:
-               self.logger.debug(f"No merged elevation for {tile.z}/{tile.x}/{tile.y}")
-               return
+                self.logger.debug(f"No merged elevation for {tile.z}/{tile.x}/{tile.y}")
+                return
             
             # Encode using output format and save
             rgb_data = ImageEncoder.data_to_rgb(
@@ -361,7 +366,7 @@ class TerrainRGBMerger:
         except Exception as e:
             self.logger.error(f"Error processing tile {tile.z}/{tile.x}/{tile.y}: {e}")
             raise
-  
+    
     def _get_tiles_for_zoom(self, zoom: int, source_conns: Dict[Path, sqlite3.Connection]) -> List[mercantile.Tile]:
         """Get list of tiles to process for a given zoom level
         
@@ -422,7 +427,7 @@ class TerrainRGBMerger:
             (
                 tile,
                 [(s.path, s.encoding.value, s.height_adjustment, s.base_val, s.interval, s.mask_values)
-                for s in self.sources],
+                 for s in self.sources],
                 self.output_path,
                 self.output_encoding.value,
                 self.resampling,
@@ -560,7 +565,7 @@ def process_tile_task(task_tuple: tuple) -> None:
         logging.debug(f"image_bytes {len(image_bytes)}")
         # Write to output database
         with MBTilesDatabase(output_path) as db:
-           db.insert_tile([tile.x, tile.y, tile.z], image_bytes)
+            db.insert_tile([tile.x, tile.y, tile.z], image_bytes)
 
     except Exception as e:
         logging.error(f"Error processing tile {tile.z}/{tile.x}/{tile.y}: {e}")
@@ -568,7 +573,7 @@ def process_tile_task(task_tuple: tuple) -> None:
     finally:
         # Clean up connections
         for conn in source_conns.values():
-           if conn:
+            if conn:
                 conn.close()
 
 def _tile_range(start: mercantile.Tile, stop: mercantile.Tile):
