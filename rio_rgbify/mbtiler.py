@@ -29,7 +29,7 @@ def process_tile(inpath, format, encoding, interval, base_val, round_digits, res
     # Log the process ID and CPU core
     proc = psutil.Process()
     logging.info(f"Processing tile {tile} on CPU {proc.cpu_num()} (PID: {os.getpid()})")
-    
+
     try:
         with rasterio.open(inpath) as src:
             x, y, z = tile
@@ -44,23 +44,30 @@ def process_tile(inpath, format, encoding, interval, base_val, round_digits, res
 
             toaffine = transform.from_bounds(*bounds + [512, 512])
             out = np.empty((512, 512), dtype=src.meta["dtype"])
-            
+
             # Calculate the window
             window = rasterio.windows.from_bounds(*bounds, transform=src.transform)
+            print(f"Tile: {tile}, Window: {window}, Source Transform: {src.transform}")
             
             # Read the source data using the window
             source_data = src.read(1, window=window, out_shape=(512,512), resampling=resampling)
-            
+            print(f"Source Data shape: {source_data.shape} min:{np.min(source_data)} max:{np.max(source_data)}")
+
             reproject(
-                source=source_data,  # Source data
+                source=source_data,
                 src_transform=src.transform,
                 src_crs=src.crs,
                 destination=out,
                 dst_transform=toaffine,
                 dst_crs="EPSG:3857",
                 resampling=resampling,
+                src_nodata=src.nodata,
+                dst_nodata=src.nodata,
             )
             
+            if src.nodata is not None:
+                out[out == src.nodata] = np.nan
+
             out = ImageEncoder.data_to_rgb(
                 out, 
                 encoding, 
@@ -70,9 +77,11 @@ def process_tile(inpath, format, encoding, interval, base_val, round_digits, res
                 quantized_alpha=quantized_alpha
             )
             
+            print(f"out: {out}")
             result = ImageEncoder.save_rgb_to_bytes(out, format)
+            print(f"result: {result}")
             return tile, result
-            
+
     except Exception as e:
         logging.error(f"Error processing tile {tile}: {str(e)}")
         return None
