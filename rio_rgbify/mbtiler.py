@@ -233,6 +233,7 @@ class RGBTiler:
         process_func = functools.partial(
             process_tile,
             self.inpath,
+            self.format,
             self.encoding,
             self.interval,
             self.base_val,
