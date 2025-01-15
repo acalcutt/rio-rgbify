@@ -187,47 +187,18 @@ class RGBTiler:
         # Smart process scaling - use fewer processes for fewer tiles
         if processes is None or processes <= 0:
             # Scale processes based on tile count and CPU count
-            available_cpus = cpu_count() - 1  # Leave one CPU free
-            processes = min(total_tiles, available_cpus, 4)  # Cap at 4 for small jobs
-            if total_tiles < 4:
-                processes = 1  # Use single process for very small jobs
+            processes = cpu_count() - 1  # Leave one CPU free
         
+        # Ensure processes does not exceed tile count
+        processes = min(total_tiles, processes)
+
         # Adjust batch size based on total tiles
         if batch_size is None:
             batch_size = max(1, total_tiles // (processes * 2))  # Ensure at least 1
         
         logging.info(f"Running with {processes} processes and batch size of {batch_size}")
 
-        if processes == 1 or total_tiles == 1:
-            logging.info("Using single process mode due to small number of tiles")
-            with self.db:
-                self.db.add_metadata({
-                    "format": self.format,
-                    "name": "",
-                    "description": "",
-                    "version": "1",
-                    "type": "baselayer"
-                })
-                
-                for tile in tiles:
-                    result = process_tile(
-                        self.inpath,
-                        self.format,
-                        self.encoding,
-                        self.interval,
-                        self.base_val,
-                        self.round_digits,
-                        self.resampling,
-                        self.quantized_alpha,
-                        tile
-                    )
-                    if result:
-                        self.db.insert_tile(*result)
-                        logging.info(f"Processed tile {tile}")
-                self.db.conn.commit()
-            return
-
-        # Multiprocessing implementation for multiple tiles
+        # Multiprocessing implementation for all tiles
         ctx = get_context("fork")
         
         process_func = functools.partial(
@@ -254,14 +225,16 @@ class RGBTiler:
             with ctx.Pool(processes, initializer=self._init_worker) as pool:
                 try:
                     total_processed = 0
-                    for result in pool.imap_unordered(process_func, tiles, chunksize=batch_size):
+                    for i, result in enumerate(pool.imap_unordered(process_func, tiles, chunksize=batch_size), 1):
                         if result:
                             self.db.insert_tile(*result)
                             total_processed += 1
                             logging.info(f"Processed {total_processed}/{total_tiles} tiles")
-                            self.db.conn.commit()  # Commit after each tile for small jobs
-                    
-                    self.db.conn.commit()
+                            
+                        if i % batch_size == 0 or i == total_tiles:  # Commit after each batch or at the end
+                            self.db.conn.commit()
+                            logging.info("Committed to database")
+
                     logging.info(f"Completed processing {total_processed} tiles")
                 
                 except KeyboardInterrupt:
