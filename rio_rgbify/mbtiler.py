@@ -69,13 +69,14 @@ def process_tile(inpath, encoding, interval, base_val, round_digits, resampling,
                 round_digits=round_digits,
                 quantized_alpha=quantized_alpha
             )
-
+            
+            # Use save_rgb_to_bytes with the correct format
             if encoding == "mapbox":
-                writer_func = ImageEncoder.encode_as_png
+              image_format = "png"
             else:
-                writer_func = ImageEncoder.encode_as_webp
-
-            result = writer_func(out, kwargs.copy(), toaffine)
+              image_format = "webp"
+            
+            result = ImageEncoder.save_rgb_to_bytes(out, image_format, kwargs=kwargs)
             return tile, result
             
     except Exception as e:
