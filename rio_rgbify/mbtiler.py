@@ -34,20 +34,24 @@ def process_tile(inpath, format, encoding, interval, base_val, round_digits, res
         with rasterio.open(inpath) as src:
             x, y, z = tile
 
-            bounds = [
+            bounds_3857 = [
                 c for i in (
                     mercantile.xy(*mercantile.ul(x, y + 1, z)),
                     mercantile.xy(*mercantile.ul(x + 1, y, z)),
                 )
                 for c in i
             ]
+            
+            #Convert mercator bounds to source bounds
+            bounds_src = transform_bounds("EPSG:3857", src.crs, *bounds_3857)
 
-            toaffine = transform.from_bounds(*bounds + [512, 512])
+            toaffine = transform.from_bounds(*bounds_3857 + [512, 512])
             out = np.empty((512, 512), dtype=np.float64)
             
-            # Calculate the window based on src.bounds
-            window = rasterio.windows.from_bounds(*src.bounds, transform=src.transform)
+            # Calculate the window based on the transformed bounds
+            window = rasterio.windows.from_bounds(*bounds_src, transform=src.transform)
             logging.info(f"Tile: {tile}, Window: {window}, Source Transform: {src.transform}")
+
             
             # If the window width or height is 0, return an empty array
             if window.width == 0 or window.height == 0:
@@ -65,6 +69,7 @@ def process_tile(inpath, format, encoding, interval, base_val, round_digits, res
                 
                result = ImageEncoder.save_rgb_to_bytes(out, format)
                return tile, result
+               
             # Read the source data using the window
             source_data = src.read(1, window=window, out_shape=(512,512), resampling=resampling)
             logging.info(f"Source Data shape: {source_data.shape} min:{np.min(source_data)} max:{np.max(source_data)}")
