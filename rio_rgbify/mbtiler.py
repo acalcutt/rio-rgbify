@@ -68,8 +68,10 @@ def process_tile(inpath, format, encoding, interval, base_val, round_digits, res
                 dst_nodata=src.nodata,
             )
             
+            print(f"out: {out}")
             if src.nodata is not None:
                 out[out == src.nodata] = np.nan
+
 
             out = ImageEncoder.data_to_rgb(
                 out, 
