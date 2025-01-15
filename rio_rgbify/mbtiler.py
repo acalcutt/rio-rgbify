@@ -88,7 +88,7 @@ class RGBTiler:
     Takes continuous source data of an arbitrary bit depth and encodes it
     in parallel into RGB tiles in an MBTiles file. Provided with a context manager:
     ```
-    with RGBTiler(inpath, outpath, min_z, max_x, **kwargs) as tiler:
+    with RGBTiler(inpath, outpath, min_z, max_x) as tiler:
         tiler.run(processes)
     ```
 

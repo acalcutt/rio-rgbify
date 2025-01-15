@@ -156,8 +156,6 @@ def rgbify(
         
         resampling_enum = getattr(Resampling, resampling)
 
-        kwargs = {"quality": 80, "lossless": False, "format": format}
-
         with RGBTiler(
             src_path,
             dst_path,
@@ -169,8 +167,7 @@ def rgbify(
             encoding=encoding,
             resampling=resampling_enum,
             quantized_alpha=quantized_alpha,
-            bounding_tile=bounding_tile,
-            **kwargs
+            bounding_tile=bounding_tile
         ) as tiler:
             tiler.run(processes=workers, batch_size=batch_size)
 
