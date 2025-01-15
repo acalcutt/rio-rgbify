@@ -164,53 +164,6 @@ class ImageEncoder:
         return table
 
     @staticmethod
-    def encode_as_webp(rgb, profile=None, affine=None):
-        """Convert and RGB(A) numpy to bytes, force WebP encoding"""
-        logging.debug(f"encode_as_webp called with rgb data shape {rgb.shape}")
-        #Force the RGB to be uint8 for the webp
-        rgb = rgb.astype(np.uint8)
-        
-        if rgb.shape[0] == 3:
-            image = Image.fromarray(np.transpose(rgb, (1, 2, 0)), mode='RGB')
-        elif rgb.shape[0] == 4:
-            image = Image.fromarray(np.transpose(rgb, (1, 2, 0)), mode='RGBA')
-        else:
-            raise ValueError(f"Unsupported number of channels in RGB data: {rgb.shape[0]}")
-        
-        image_bytes = BytesIO()
-        
-        image.save(image_bytes, format='WEBP', lossless=True)
-        image_bytes.seek(0)
-        
-        with rasterio.io.MemoryFile() as memfile:
-            memfile.write(image_bytes.read())
-            with memfile.open(driver="WEBP") as dataset:
-                return memfile.read()
-    
-    @staticmethod
-    def encode_as_png(rgb, kwargs, transform):
-        """Convert and RGB(A) numpy to bytes, force PNG encoding"""
-        logging.debug(f"encode_as_png called with rgb data shape {rgb.shape}")
-        #Force the RGB to be uint8 for the png,
-        rgb = rgb.astype(np.uint8)
-        
-        if rgb.shape[0] == 3:
-            image = Image.fromarray(np.transpose(rgb, (1, 2, 0)), mode='RGB')
-        elif rgb.shape[0] == 4:
-            image = Image.fromarray(np.transpose(rgb, (1, 2, 0)), mode='RGBA')
-        else:
-            raise ValueError(f"Unsupported number of channels in RGB data: {rgb.shape[0]}")
-        
-        image_bytes = BytesIO()
-        image.save(image_bytes, **kwargs)
-        image_bytes.seek(0)
-      
-        with rasterio.io.MemoryFile() as memfile:
-             memfile.write(image_bytes.read())
-             with memfile.open(driver="PNG") as dataset:
-                return memfile.read()
-
-    @staticmethod
     def save_rgb_to_bytes(rgb_data: np.ndarray, output_image_format: str | ImageFormat, default_tile_size: int = 512) -> bytes:
         print(f"save_rgb_to_bytes called with rgb data shape {rgb_data.shape}")
         print(f"Requested format: {output_image_format}, type: {type(output_image_format)}")

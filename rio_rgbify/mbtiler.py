@@ -24,7 +24,7 @@ import psutil
 
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
 
-def process_tile(inpath, encoding, interval, base_val, round_digits, resampling, quantized_alpha, kwargs, tile):
+def process_tile(inpath, encoding, interval, base_val, round_digits, resampling, quantized_alpha, tile):
     """Standalone tile processing function"""
     # Log the process ID and CPU core
     proc = psutil.Process()
@@ -143,7 +143,6 @@ class RGBTiler:
         resampling=Resampling.nearest,
         quantized_alpha=True,
         bounding_tile=None,
-        **kwargs
     ):
         self.inpath = inpath
         self.outpath = outpath
@@ -156,16 +155,6 @@ class RGBTiler:
         self.round_digits = round_digits
         self.resampling = resampling
         self.quantized_alpha = quantized_alpha
-        self.kwargs = kwargs
-        
-        if "format" not in kwargs:
-            self.image_format = "png"
-        elif kwargs["format"].lower() == "png":
-            self.image_format = "png"
-        elif kwargs["format"].lower() == "webp":
-            self.image_format = "webp"
-        else:
-            raise ValueError(f"{kwargs['format']} is not a supported filetype!")
 
 
     def _generate_tiles(self, bbox, src_crs):
@@ -233,7 +222,6 @@ class RGBTiler:
                         self.round_digits,
                         self.resampling,
                         self.quantized_alpha,
-                        self.kwargs,
                         tile
                     )
                     if result:
@@ -254,7 +242,6 @@ class RGBTiler:
             self.round_digits,
             self.resampling,
             self.quantized_alpha,
-            self.kwargs
         )
 
         with self.db:
