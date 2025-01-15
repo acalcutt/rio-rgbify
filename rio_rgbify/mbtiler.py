@@ -76,7 +76,7 @@ def process_tile(inpath, encoding, interval, base_val, round_digits, resampling,
             else:
               image_format = "webp"
             
-            result = ImageEncoder.save_rgb_to_bytes(out, image_format, kwargs=kwargs)
+            result = ImageEncoder.save_rgb_to_bytes(out, image_format)
             return tile, result
             
     except Exception as e:
