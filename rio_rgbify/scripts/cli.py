@@ -165,6 +165,7 @@ def rgbify(
             base_val=base_val,
             round_digits=round_digits,
             encoding=encoding,
+            format=format,
             resampling=resampling_enum,
             quantized_alpha=quantized_alpha,
             bounding_tile=bounding_tile

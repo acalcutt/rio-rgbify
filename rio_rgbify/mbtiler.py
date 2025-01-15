@@ -24,7 +24,7 @@ import psutil
 
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
 
-def process_tile(inpath, encoding, interval, base_val, round_digits, resampling, quantized_alpha, tile):
+def process_tile(inpath, format, encoding, interval, base_val, round_digits, resampling, quantized_alpha, tile):
     """Standalone tile processing function"""
     # Log the process ID and CPU core
     proc = psutil.Process()
@@ -70,13 +70,7 @@ def process_tile(inpath, encoding, interval, base_val, round_digits, resampling,
                 quantized_alpha=quantized_alpha
             )
             
-            # Use save_rgb_to_bytes with the correct format
-            if encoding == "mapbox":
-              image_format = "png"
-            else:
-              image_format = "webp"
-            
-            result = ImageEncoder.save_rgb_to_bytes(out, image_format)
+            result = ImageEncoder.save_rgb_to_bytes(out, format)
             return tile, result
             
     except Exception as e:
@@ -140,6 +134,7 @@ class RGBTiler:
         base_val=0,
         round_digits=0,
         encoding="mapbox",
+        format="webp",
         resampling=Resampling.nearest,
         quantized_alpha=True,
         bounding_tile=None,
@@ -150,6 +145,7 @@ class RGBTiler:
         self.max_z = max_z
         self.bounding_tile = bounding_tile
         self.encoding = encoding
+        self.format = format
         self.interval = interval
         self.base_val = base_val
         self.round_digits = round_digits
@@ -206,7 +202,7 @@ class RGBTiler:
             logging.info("Using single process mode due to small number of tiles")
             with self.db:
                 self.db.add_metadata({
-                    "format": self.image_format,
+                    "format": self.format,
                     "name": "",
                     "description": "",
                     "version": "1",
@@ -216,6 +212,7 @@ class RGBTiler:
                 for tile in tiles:
                     result = process_tile(
                         self.inpath,
+                        self.format,
                         self.encoding,
                         self.interval,
                         self.base_val,
@@ -246,7 +243,7 @@ class RGBTiler:
 
         with self.db:
             self.db.add_metadata({
-                "format": self.image_format,
+                "format": self.format,
                 "name": "",
                 "description": "",
                 "version": "1",
