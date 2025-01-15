@@ -53,7 +53,7 @@ def process_tile(inpath, format, encoding, interval, base_val, round_digits, res
             
             reproject(
                 source=source_data,  # Source data
-                src_transform=rasterio.transform.from_bounds(*bounds, width=512, height=512),
+                src_transform=src.transform,
                 src_crs=src.crs,
                 destination=out,
                 dst_transform=toaffine,
