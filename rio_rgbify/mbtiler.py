@@ -34,19 +34,22 @@ def process_tile(inpath, format, encoding, interval, base_val, round_digits, res
         with rasterio.open(inpath) as src:
             x, y, z = tile
 
-            bounds = [
+            bounds_3857 = [
                 c for i in (
                     mercantile.xy(*mercantile.ul(x, y + 1, z)),
                     mercantile.xy(*mercantile.ul(x + 1, y, z)),
                 )
                 for c in i
             ]
-
-            toaffine = transform.from_bounds(*bounds + [512, 512])
+            
+            #Convert mercator bounds to source bounds
+            bounds_src = transform_bounds("EPSG:3857", src.crs, *bounds_3857)
+            
+            toaffine = transform.from_bounds(*bounds_3857 + [512, 512])
             out = np.empty((512, 512), dtype=src.meta["dtype"])
 
             # Calculate the window
-            window = rasterio.windows.from_bounds(*bounds, transform=src.transform)
+            window = rasterio.windows.from_bounds(*bounds_src, transform=src.transform)
             print(f"Tile: {tile}, Window: {window}, Source Transform: {src.transform}")
             
             # Read the source data using the window
@@ -79,9 +82,11 @@ def process_tile(inpath, format, encoding, interval, base_val, round_digits, res
             
             print(f"out: {out}")
             result = ImageEncoder.save_rgb_to_bytes(out, format)
-            print(f"result: {result}")
             return tile, result
 
+    except Exception as e:
+        logging.error(f"Error processing tile {tile}: {str(e)}")
+        return None
     except Exception as e:
         logging.error(f"Error processing tile {tile}: {str(e)}")
         return None
