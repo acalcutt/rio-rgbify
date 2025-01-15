@@ -171,5 +171,5 @@ The merge logic works by merging the input sources in order, applying the height
 
 ## Merge Example
 ```
-rio rgbify merge --config config.json -j 24
+rio merge --config config.json -j 24
 ```
