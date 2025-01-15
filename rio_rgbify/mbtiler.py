@@ -28,7 +28,7 @@ def process_tile(inpath, format, encoding, interval, base_val, round_digits, res
     """Standalone tile processing function"""
     # Log the process ID and CPU core
     proc = psutil.Process()
-    logging.info(f"Processing tile {tile} on CPU {proc.cpu_num()} (PID: {os.getpid()})")
+    print(f"Processing tile {tile} on CPU {proc.cpu_num()} (PID: {os.getpid()})")
 
     try:
         with rasterio.open(inpath) as src:
@@ -46,8 +46,8 @@ def process_tile(inpath, format, encoding, interval, base_val, round_digits, res
             bounds_src = transform_bounds("EPSG:3857", src.crs, *bounds_3857)
             
             toaffine = transform.from_bounds(*bounds_3857 + [512, 512])
-            out = np.empty((512, 512), dtype=src.meta["dtype"])
-
+            out = np.empty((512, 512), dtype=np.float64) # Use np.float64 to accept NaN values
+            
             # Calculate the window
             window = rasterio.windows.from_bounds(*bounds_src, transform=src.transform)
             print(f"Tile: {tile}, Window: {window}, Source Transform: {src.transform}")
@@ -65,14 +65,13 @@ def process_tile(inpath, format, encoding, interval, base_val, round_digits, res
                 dst_crs="EPSG:3857",
                 resampling=resampling,
                 src_nodata=src.nodata,
-                dst_nodata=src.nodata,
+                dst_nodata=np.nan, # Set dst_nodata to nan to handle nan values
             )
             
-            print(f"out: {out}")
             if src.nodata is not None:
-                out[out == src.nodata] = np.nan
+                out[np.isnan(out)] = np.nan
 
-
+            print(f"out before data_to_rgb: {out}")
             out = ImageEncoder.data_to_rgb(
                 out, 
                 encoding, 
@@ -81,10 +80,14 @@ def process_tile(inpath, format, encoding, interval, base_val, round_digits, res
                 round_digits=round_digits,
                 quantized_alpha=quantized_alpha
             )
+            print(f"out after data_to_rgb: {out}")
             
-            print(f"out: {out}")
             result = ImageEncoder.save_rgb_to_bytes(out, format)
             return tile, result
+
+    except Exception as e:
+        logging.error(f"Error processing tile {tile}: {str(e)}")
+        return None
 
     except Exception as e:
         logging.error(f"Error processing tile {tile}: {str(e)}")
@@ -198,7 +201,7 @@ class RGBTiler:
             tiles = list(self._generate_tiles(bbox, src_crs))
 
         total_tiles = len(tiles)
-        logging.info(f"Total tiles to process: {total_tiles}")
+        print(f"Total tiles to process: {total_tiles}")
 
         # Smart process scaling - use fewer processes for fewer tiles
         if processes is None or processes <= 0:
@@ -212,7 +215,7 @@ class RGBTiler:
         if batch_size is None:
             batch_size = max(1, total_tiles // (processes * 2))  # Ensure at least 1
         
-        logging.info(f"Running with {processes} processes and batch size of {batch_size}")
+        print(f"Running with {processes} processes and batch size of {batch_size}")
 
         # Multiprocessing implementation for all tiles
         ctx = get_context("fork")
@@ -245,16 +248,16 @@ class RGBTiler:
                         if result:
                             self.db.insert_tile(*result)
                             total_processed += 1
-                            logging.info(f"Processed {total_processed}/{total_tiles} tiles")
+                            print(f"Processed {total_processed}/{total_tiles} tiles")
                             
                         if i % batch_size == 0 or i == total_tiles:  # Commit after each batch or at the end
                             self.db.conn.commit()
-                            logging.info("Committed to database")
+                            print("Committed to database")
 
-                    logging.info(f"Completed processing {total_processed} tiles")
+                    print(f"Completed processing {total_processed} tiles")
                 
                 except KeyboardInterrupt:
-                    logging.info("Caught KeyboardInterrupt, terminating workers")
+                    print("Caught KeyboardInterrupt, terminating workers")
                     pool.terminate()
                     raise
                 except Exception as e:
