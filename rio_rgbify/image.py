@@ -164,7 +164,7 @@ class ImageEncoder:
         return table
 
     @staticmethod
-    def encode_as_webp(rgb, kwargs, transform):
+    def encode_as_webp(rgb, profile=None, affine=None):
         """Convert and RGB(A) numpy to bytes, force WebP encoding"""
         logging.debug(f"encode_as_webp called with rgb data shape {rgb.shape}")
         #Force the RGB to be uint8 for the webp
@@ -178,9 +178,10 @@ class ImageEncoder:
             raise ValueError(f"Unsupported number of channels in RGB data: {rgb.shape[0]}")
         
         image_bytes = BytesIO()
-        image.save(image_bytes, lossless=True, **kwargs)
+        
+        image.save(image_bytes, format='WEBP', lossless=True)
         image_bytes.seek(0)
-      
+        
         with rasterio.io.MemoryFile() as memfile:
             memfile.write(image_bytes.read())
             with memfile.open(driver="WEBP") as dataset:
