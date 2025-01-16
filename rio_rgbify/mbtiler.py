@@ -58,7 +58,6 @@ def process_tile(inpath, format, encoding, interval, base_val, round_digits, res
 
             rgb = ImageEncoder.data_to_rgb(out, encoding, interval, base_val, round_digits, quantized_alpha)
             print(f"process_tile: data after data_to_rgb: min={np.nanmin(rgb)}, max={np.nanmax(rgb)}, type: {rgb.dtype}")
-            print(f"rgb {rgb}")
             result = ImageEncoder.save_rgb_to_bytes(rgb, format)
             
             print(f"process_tile: Encoded tile {tile}")
@@ -272,7 +271,6 @@ class RGBTiler:
                 try:
                     total_processed = 0
                     for i, result in enumerate(pool.imap_unordered(process_func, tiles, chunksize=batch_size), 1):
-                        print(f"run: Got result: {result} from imap_unordered")
                         if result:
                             tile, _ = result
                             print(f"run: Inserting tile {tile} into database")
