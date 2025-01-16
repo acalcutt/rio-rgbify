@@ -134,6 +134,7 @@ class RGBTiler:
         self.resampling = resampling
         self.quantized_alpha = quantized_alpha
 
+    @staticmethod
     def _tile_range(min_tile, max_tile):
         """
         Given a min and max tile, return an iterator of
@@ -188,7 +189,7 @@ class RGBTiler:
         n -= EPSILON
 
         for z in range(minz, maxz + 1):
-            for x, y in self._tile_range(mercantile.tile(w, n, z), mercantile.tile(e, s, z)):
+            for x, y in RGBTiler._tile_range(mercantile.tile(w, n, z), mercantile.tile(e, s, z)):
                 yield [x, y, z]
 
     def _init_worker(self):
@@ -276,7 +277,12 @@ class RGBTiler:
                     pool.join()
 
     def __enter__(self):
-        self.db = MBTilesDatabase(self.outpath)
+        try:
+            self.db = MBTilesDatabase(self.outpath)
+        except Exception as e:
+            logging.error(f"Failed to initialize database: {e}")
+            self.db = None
+            raise
         return self
 
     def __exit__(self, ext_t, ext_v, trace):
