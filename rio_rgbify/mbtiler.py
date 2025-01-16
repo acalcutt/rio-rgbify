@@ -34,73 +34,28 @@ def process_tile(inpath, format, encoding, interval, base_val, round_digits, res
         with rasterio.open(inpath) as src:
             x, y, z = tile
 
-            bounds_3857 = [
-                c for i in (
+            bounds = [
+                c
+                for i in (
                     mercantile.xy(*mercantile.ul(x, y + 1, z)),
                     mercantile.xy(*mercantile.ul(x + 1, y, z)),
                 )
                 for c in i
             ]
-            
-            #Convert mercator bounds to source bounds
-            bounds_src = transform_bounds("EPSG:3857", src.crs, *bounds_3857)
 
-            toaffine = transform.from_bounds(*bounds_3857 + [512, 512])
-            out = np.empty((512, 512), dtype=np.float64)
-            
-            # Calculate the window based on the transformed bounds
-            window = rasterio.windows.from_bounds(*bounds_src, transform=src.transform)
-            logging.info(f"Tile: {tile}, Window: {window}, Source Transform: {src.transform}")
+            toaffine = transform.from_bounds(*bounds + [512, 512])
 
-            
-            # If the window width or height is 0, return an empty array
-            if window.width == 0 or window.height == 0:
-               logging.info(f"Empty Window, skipping reprojection: {window}")
-               out = np.empty((0,0), dtype=np.float64)
-               
-               out = ImageEncoder.data_to_rgb(
-                  out, 
-                  encoding, 
-                  interval, 
-                  base_val=base_val, 
-                  round_digits=round_digits,
-                  quantized_alpha=quantized_alpha
-                )
-                
-               result = ImageEncoder.save_rgb_to_bytes(out, format)
-               return tile, result
-               
-            # Read the source data using the window
-            source_data = src.read(1, window=window, out_shape=(512,512), resampling=resampling)
-            logging.info(f"Source Data shape: {source_data.shape} min:{np.min(source_data)} max:{np.max(source_data)}")
-            
+            out = np.empty((512, 512), dtype=src.meta["dtype"])
+
             reproject(
-                source=source_data,  # Source data
-                src_transform=src.transform, #Source Transform from file
-                src_crs=src.crs, # Source CRS from file
-                destination=out,
+                rasterio.band(src, 1),
+                out,
                 dst_transform=toaffine,
                 dst_crs="EPSG:3857",
                 resampling=resampling,
-                src_nodata=src.nodata,
-                dst_nodata=np.nan
             )
             
-            if src.nodata is not None:
-                out[np.isnan(out)] = np.nan
-                
-            logging.info(f"out before data_to_rgb: {out}")
-            out = ImageEncoder.data_to_rgb(
-                out, 
-                encoding, 
-                interval, 
-                base_val=base_val, 
-                round_digits=round_digits,
-                quantized_alpha=quantized_alpha
-            )
-            logging.info(f"out after data_to_rgb: {out}")
-            
-            result = ImageEncoder.save_rgb_to_bytes(out, format)
+            result = ImageEncoder.data_to_rgb(out, encoding, base_val, interval, round_digits)
             return tile, result
             
     except Exception as e:
@@ -182,34 +137,78 @@ class RGBTiler:
         self.resampling = resampling
         self.quantized_alpha = quantized_alpha
 
+    def _tile_range(min_tile, max_tile):
+        """
+        Given a min and max tile, return an iterator of
+        all combinations of this tile range
+
+        Parameters
+        -----------
+        min_tile: list
+            [x, y, z] of minimun tile
+        max_tile:
+            [x, y, z] of minimun tile
+
+        Returns
+        --------
+        tiles: iterator
+            iterator of [x, y, z] tiles
+        """
+        min_x, min_y, _ = min_tile
+        max_x, max_y, _ = max_tile
+
+        return itertools.product(range(min_x, max_x + 1), range(min_y, max_y + 1))
 
     def _generate_tiles(self, bbox, src_crs):
-      
-        if self.bounding_tile is None:
-            tiles = mercantile.tiles(
-                *bbox, zooms=range(self.min_z, self.max_z + 1), truncate=False
-            )
-        else:
-            constrained_bbox = list(mercantile.bounds(self.bounding_tile))
-            tiles = mercantile.tiles(
-                *constrained_bbox, zooms=range(self.min_z, self.max_z + 1), truncate=False
-            )
-        
-        for tile in tiles:
-            yield tile
+        """
+        Given a bounding box, zoom range, and source crs,
+        find all tiles that would intersect
+
+        Parameters
+        -----------
+        bbox: list
+            [w, s, e, n] bounds
+        src_crs: str
+            the source crs of the input bbox
+        minz: int
+            minumum zoom to find tiles for
+        maxz: int
+            maximum zoom to find tiles for
+
+        Returns
+        --------
+        tiles: generator
+            generator of [x, y, z] tiles that intersect
+            the provided bounding box
+        """
+        w, s, e, n = transform_bounds(*[src_crs, "EPSG:4326"] + bbox)
+
+        EPSILON = 1.0e-10
+
+        w += EPSILON
+        s += EPSILON
+        e -= EPSILON
+        n -= EPSILON
+
+        for z in range(minz, maxz + 1):
+            for x, y in self._tile_range(mercantile.tile(w, n, z), mercantile.tile(e, s, z)):
+                yield [x, y, z]
 
     def _init_worker(self):
-        signal.signal(signal.SIGINT, signal.SIG_IGN)
+            signal.signal(signal.SIGINT, signal.SIG_IGN)
 
 
     def run(self, processes=None, batch_size=None):
         """Main processing loop with smart process scaling"""
         print(f"self.inpath {self.inpath}")
         with rasterio.open(self.inpath) as src:
-            bbox = list(src.bounds)
-            src_crs = src.crs
-            print(f"src_crs1 {src_crs}")
-            tiles = list(self._generate_tiles(bbox, src_crs))
+            # generator of tiles to make
+            if self.bounding_tile is None:
+                bbox = list(src.bounds)
+                tiles = self._make_tiles(bbox, src.crs, self.min_z, self.max_z)
+            else:
+                constrained_bbox = list(mercantile.bounds(self.bounding_tile))
+                tiles = self._make_tiles(constrained_bbox, "EPSG:4326", self.min_z, self.max_z)
 
         total_tiles = len(tiles)
         print(f"Total tiles to process: {total_tiles}")
@@ -257,7 +256,7 @@ class RGBTiler:
                     total_processed = 0
                     for i, result in enumerate(pool.imap_unordered(process_func, tiles, chunksize=batch_size), 1):
                         if result:
-                            self.db.insert_tile(*result)
+                            self.db.insert_tile_with_retry(*result)
                             total_processed += 1
                             print(f"Processed {total_processed}/{total_tiles} tiles")
                             
