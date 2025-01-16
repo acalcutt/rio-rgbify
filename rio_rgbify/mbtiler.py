@@ -56,7 +56,7 @@ def process_tile(inpath, format, encoding, interval, base_val, round_digits, res
             print(f"process_tile: Reprojected tile {tile}, out shape: {out.shape}")
             print(f"process_tile: data before data_to_rgb: min={np.nanmin(out)}, max={np.nanmax(out)}, type: {out.dtype}")
 
-            rgb = ImageEncoder.data_to_rgb(out, encoding, base_val, interval, round_digits, quantized_alpha)
+            rgb = ImageEncoder.data_to_rgb(out, encoding, interval, base_val, round_digits, quantized_alpha)
             print(f"process_tile: data after data_to_rgb: min={np.nanmin(rgb)}, max={np.nanmax(rgb)}, type: {rgb.dtype}")
 
             result = ImageEncoder.save_rgb_to_bytes(rgb, format) 
@@ -122,8 +122,8 @@ class RGBTiler:
         outpath,
         min_z,
         max_z,
-        interval=1,
-        base_val=0,
+        interval=0.1, # updated default
+        base_val=-10000, # updated default
         round_digits=0,
         encoding="mapbox",
         format="webp",
