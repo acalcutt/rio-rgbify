@@ -55,6 +55,7 @@ def process_tile(inpath, format, encoding, interval, base_val, round_digits, res
                 resampling=resampling,
             )
             print(f"process_tile: Reprojected tile {tile}, out shape: {out.shape}")
+            print(f"out2 {out}")
             
             rgb = ImageEncoder.data_to_rgb(out, encoding, base_val, interval, round_digits, quantized_alpha)
             print(f"rgb {rgb}")
