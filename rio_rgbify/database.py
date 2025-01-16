@@ -4,6 +4,30 @@ import math
 from typing import List, Optional
 from contextlib import contextmanager
 from pathlib import Path
+import time
+import functools
+import logging
+
+def retry(attempts, base_delay=1, max_delay=10):
+    def decorator(func):
+        @functools.wraps(func)
+        def wrapper(*args, **kwargs):
+            last_exception = None
+            for attempt in range(attempts):
+                try:
+                    return func(*args, **kwargs)
+                except sqlite3.OperationalError as e:
+                    last_exception = e
+                    delay = min(base_delay * (2 ** attempt), max_delay)
+                    logging.warning(f"Database locked, retry attempt {attempt+1} after {delay} seconds...")
+                    time.sleep(delay)
+
+            if last_exception:
+                logging.error(f"Failed after {attempts} attempts, raising last exception")
+                raise last_exception
+            return None
+        return wrapper
+    return decorator
 
 class MBTilesDatabase:
     def __init__(self, outpath: str):
@@ -79,12 +103,14 @@ class MBTilesDatabase:
             h &= 0xFFFFFFFFFFFFFFFF  # 64-bit mask
 
         return h
-
-    def insert_tile(self, tile: List[int], contents: bytes):
-        """Add tile to database with deduplication logic"""
+    
+    @retry(attempts=5, base_delay=0.5, max_delay=5) # retry with 5 attempts
+    def insert_tile_with_retry(self, tile: List[int], contents: bytes, use_inverse_y: bool = False):
+        """Add tile to database with deduplication logic and retry"""
         x, y, z = tile
         # mbtiles use inverse y indexing
-        #tiley = int(math.pow(2, z)) - y - 1
+        if use_inverse_y:
+            y = int(math.pow(2, z)) - y - 1
         
         #create tile_id based on tile contents
         tileDataId = str(self.fnv1a(contents))
