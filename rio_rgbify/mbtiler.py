@@ -289,4 +289,3 @@ class RGBTiler:
         if self.db:
             if ext_t:
                 traceback.print_exc()
-            self.db.__exit__(ext_t, ext_v, trace)
