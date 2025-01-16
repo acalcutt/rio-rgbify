@@ -215,33 +215,30 @@ class RGBTiler:
         """Main processing loop with smart process scaling"""
         print(f"self.inpath {self.inpath}")
         with rasterio.open(self.inpath) as src:
-             # generator of tiles to make
+            # generator of tiles to make
             if self.bounding_tile is None:
                 bbox = list(src.bounds)
-                tiles = list(self._make_tiles(bbox, src.crs, self.min_z, self.max_z)) # Force the generation of tiles to log them
+                tiles = self._make_tiles(bbox, src.crs, self.min_z, self.max_z)
             else:
                 constrained_bbox = list(mercantile.bounds(self.bounding_tile))
-                tiles = list(self._make_tiles(constrained_bbox, "EPSG:4326", self.min_z, self.max_z)) # Force the generation of tiles to log them
+                tiles = self._make_tiles(constrained_bbox, "EPSG:4326", self.min_z, self.max_z)
 
-        total_tiles = len(tiles)
-        print(f"Total tiles to process: {total_tiles}")
+            total_tiles = len(list(tiles))
+            print(f"Total tiles to process: {total_tiles}")
 
-        # Log the generated tiles
-        print(f"Tiles to Process {tiles}")
+            # Smart process scaling - use fewer processes for fewer tiles
+            if processes is None or processes <= 0:
+                # Scale processes based on tile count and CPU count
+                processes = cpu_count() - 1  # Leave one CPU free
+            
+            # Ensure processes does not exceed tile count
+            processes = min(total_tiles, processes)
 
-        # Smart process scaling - use fewer processes for fewer tiles
-        if processes is None or processes <= 0:
-            # Scale processes based on tile count and CPU count
-            processes = cpu_count() - 1  # Leave one CPU free
-        
-        # Ensure processes does not exceed tile count
-        processes = min(total_tiles, processes)
-
-        # Adjust batch size based on total tiles
-        if batch_size is None:
-            batch_size = max(1, total_tiles // (processes * 2))  # Ensure at least 1
-        
-        print(f"Running with {processes} processes and batch size of {batch_size}")
+            # Adjust batch size based on total tiles
+            if batch_size is None:
+                batch_size = max(1, total_tiles // (processes * 2))  # Ensure at least 1
+            
+            print(f"Running with {processes} processes and batch size of {batch_size}")
 
         # Multiprocessing implementation for all tiles
         ctx = get_context("fork")
@@ -259,26 +256,22 @@ class RGBTiler:
         )
 
         with self.db:
-            self.db.add_metadata({
-                "format": self.format,
-                "name": "",
-                "description": "",
-                "version": "1",
-                "type": "baselayer"
-            })
+          
+            if self.bounding_tile is None:
+                bbox = list(src.bounds)
+                self.db.add_bounds_center_metadata(bbox, self.min_z, self.max_z, self.encoding, self.format, "Terrain")
+            else:
+                constrained_bbox = list(mercantile.bounds(self.bounding_tile))
+                self.db.add_bounds_center_metadata(constrained_bbox, self.min_z, self.max_z, self.encoding, self.format, "Terrain")
             
             with ctx.Pool(processes, initializer=self._init_worker) as pool:
                 try:
                     total_processed = 0
                     for i, result in enumerate(pool.imap_unordered(process_func, tiles, chunksize=batch_size), 1):
                         if result:
-                            tile, _ = result
-                            print(f"run: Inserting tile {tile} into database")
                             self.db.insert_tile_with_retry(*result, use_inverse_y=True)
                             total_processed += 1
                             print(f"Processed {total_processed}/{total_tiles} tiles")
-                        else:
-                            logging.warning(f"run:  Got None result from imap_unordered")
                             
                         if i % batch_size == 0 or i == total_tiles:  # Commit after each batch or at the end
                             self.db.conn.commit()

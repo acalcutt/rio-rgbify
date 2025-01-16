@@ -1,3 +1,4 @@
+import datetime
 import sqlite3
 import os
 import math
@@ -7,6 +8,8 @@ from pathlib import Path
 import time
 import functools
 import logging
+import mercantile
+import json
 
 def retry(attempts, base_delay=1, max_delay=10):
     def decorator(func):
@@ -129,6 +132,34 @@ class MBTilesDatabase:
             "VALUES (?, ?, ?, ?);",
             (z, x, y, tileDataId),
         )
+        
+    
+    def add_bounds_center_metadata(self, bounds: Optional[List[float]], min_zoom: int, max_zoom: int, encoding: str, format: str, name: str = "Terrain"):
+        """Adds bounds and center metadata, along with format, name, description and version."""
+        if bounds is None:
+            bounds_str = '-180,-90,180,90'  # Default for the whole planet
+            center_lon = 0
+            center_lat = 0
+        else:
+            w, s, e, n = bounds
+            bounds_str = f'{w},{s},{e},{n}'
+            center_lon = (w + e) / 2
+            center_lat = (n + s) / 2
+            
+        center_zoom = int((min_zoom + max_zoom) / 2)
+
+        self.add_metadata({
+            "format": format,
+            "name": name,
+            "description": f"Created {datetime.datetime.now()}",
+            "version": "1",
+            "type": "baselayer",
+            "minzoom": min_zoom,
+            "maxzoom": max_zoom,
+            "encoding": encoding,
+            "bounds": bounds_str,
+            "center": f'{center_lon},{center_lat},{center_zoom}'
+        })
 
     @contextmanager
     def db_connection(self):
