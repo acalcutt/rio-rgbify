@@ -59,7 +59,8 @@ def process_tile(inpath, format, encoding, interval, base_val, round_digits, res
             rgb = ImageEncoder.data_to_rgb(out, encoding, interval, base_val, round_digits, quantized_alpha)
             print(f"process_tile: data after data_to_rgb: min={np.nanmin(rgb)}, max={np.nanmax(rgb)}, type: {rgb.dtype}")
 
-            result = ImageEncoder.save_rgb_to_bytes(rgb, format) 
+            result = ImageEncoder.save_rgb_to_bytes(rgb, format)
+            print(f"result {result}")
             print(f"process_tile: Encoded tile {tile}")
 
             return tile, result
