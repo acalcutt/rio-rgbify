@@ -1,17 +1,13 @@
 from __future__ import with_statement
 from __future__ import division
 
-import sys
 import traceback
 import itertools
 import mercantile
 import rasterio
 import numpy as np
-from multiprocessing import Pool, Queue, get_context, current_process, cpu_count
+from multiprocessing import get_context, cpu_count
 import os
-from riomucho.single_process_pool import MockTub
-from io import BytesIO
-from PIL import Image
 from rasterio import transform
 from rasterio.warp import reproject, transform_bounds
 from rasterio.enums import Resampling
@@ -55,7 +51,8 @@ def process_tile(inpath, format, encoding, interval, base_val, round_digits, res
                 resampling=resampling,
             )
             
-            result = ImageEncoder.data_to_rgb(out, encoding, base_val, interval, round_digits)
+            rgb = ImageEncoder.data_to_rgb(out, encoding, base_val, interval, round_digits, quantized_alpha)
+            result = ImageEncoder.save_rgb_to_bytes(rgb, format) 
             return tile, result
             
     except Exception as e:
@@ -159,7 +156,7 @@ class RGBTiler:
 
         return itertools.product(range(min_x, max_x + 1), range(min_y, max_y + 1))
 
-    def _generate_tiles(self, bbox, src_crs):
+    def _make_tiles(self, bbox, src_crs, minz, maxz):
         """
         Given a bounding box, zoom range, and source crs,
         find all tiles that would intersect
@@ -195,7 +192,7 @@ class RGBTiler:
                 yield [x, y, z]
 
     def _init_worker(self):
-            signal.signal(signal.SIGINT, signal.SIG_IGN)
+        signal.signal(signal.SIGINT, signal.SIG_IGN)
 
 
     def run(self, processes=None, batch_size=None):
@@ -210,7 +207,7 @@ class RGBTiler:
                 constrained_bbox = list(mercantile.bounds(self.bounding_tile))
                 tiles = self._make_tiles(constrained_bbox, "EPSG:4326", self.min_z, self.max_z)
 
-        total_tiles = len(tiles)
+        total_tiles = len(list(tiles))
         print(f"Total tiles to process: {total_tiles}")
 
         # Smart process scaling - use fewer processes for fewer tiles
@@ -256,7 +253,7 @@ class RGBTiler:
                     total_processed = 0
                     for i, result in enumerate(pool.imap_unordered(process_func, tiles, chunksize=batch_size), 1):
                         if result:
-                            self.db.insert_tile_with_retry(*result)
+                            self.db.insert_tile_with_retry(*result, use_inverse_y=True)
                             total_processed += 1
                             print(f"Processed {total_processed}/{total_tiles} tiles")
                             
@@ -283,6 +280,7 @@ class RGBTiler:
         return self
 
     def __exit__(self, ext_t, ext_v, trace):
-        if ext_t:
-            traceback.print_exc()
-        self.db.__exit__(ext_t, ext_v, trace)
+        if self.db:
+            if ext_t:
+                traceback.print_exc()
+            self.db.__exit__(ext_t, ext_v, trace)
