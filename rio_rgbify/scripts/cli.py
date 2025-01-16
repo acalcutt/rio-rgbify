@@ -218,7 +218,7 @@ def merge(config, workers, verbose):
     min_zoom = config_data.get("min_zoom", 0)
     max_zoom = config_data.get("max_zoom", None)
     bounds = config_data.get("bounds", None)
-    gaussian_blur_sigma = config_data.get("gaussian_blur_sigma", 0.8)
+    gaussian_blur_sigma = config_data.get("gaussian_blur_sigma", 0.2)
     
     if bounds is not None:
       try:

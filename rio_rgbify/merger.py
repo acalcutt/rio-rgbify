@@ -59,7 +59,7 @@ class TerrainRGBMerger:
     def __init__(self, sources, output_path, output_encoding=EncodingType.MAPBOX,
                  resampling=Resampling.lanczos, processes=None, default_tile_size=512,
                  output_image_format=ImageFormat.PNG, output_quantized_alpha=False,
-                 min_zoom=0, max_zoom=None, bounds=None, gaussian_blur_sigma=0.8): # Add gaussian_blur_sigma
+                 min_zoom=0, max_zoom=None, bounds=None, gaussian_blur_sigma=0.2): # Add gaussian_blur_sigma
         self.sources = sources
         self.output_path = Path(output_path)
         self.output_encoding = output_encoding
@@ -102,7 +102,7 @@ class TerrainRGBMerger:
         bounds : Optional[List[float]], optional
             The bounding box to limit the tiles being generated, defaults to None. If None, the bounds of the last source will be used.
         gaussian_blur_sigma: float
-            The sigma value to use for the gaussian blur filter, defaults to 0.8
+            The sigma value to use for the gaussian blur filter, defaults to 0.2
         """
         print(f"__init__ called")
         self.sources = sources
@@ -283,7 +283,10 @@ class TerrainRGBMerger:
         """Resample tile data if source zoom differs from target"""
         #print(f"_resample_if_needed called with tile_data: {tile_data}, target_tile: {target_tile}")
         if tile_data.source_zoom != target_tile.z:
-
+            zoom_diff = abs(target_tile.z - tile_data.source_zoom)
+            
+            #Scale the blur based on the zoom difference
+            dynamic_sigma = self.gaussian_blur_sigma * (zoom_diff)
             source_tile = mercantile.Tile(x=target_tile.x // (2**(target_tile.z - tile_data.source_zoom)),
                                          y=target_tile.y // (2**(target_tile.z - tile_data.source_zoom)),
                                          z=tile_data.source_zoom
@@ -320,7 +323,7 @@ class TerrainRGBMerger:
                         resampling=self.resampling
                     )
                     # Apply Gaussian blur to destination data after reprojection
-                    blurred_data = gaussian_filter(dst_data, sigma=self.gaussian_blur_sigma)
+                    blurred_data = gaussian_filter(dst_data, sigma=dynamic_sigma)
 
 
                     if blurred_data.ndim == 3:

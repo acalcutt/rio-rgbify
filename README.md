@@ -127,7 +127,7 @@ The `merge` command makes use of a json configuration file which should be passe
     "min_zoom": 2,
     "max_zoom": 10,
     "bounds": [-10,10,20,50],
-    "gaussian_blur_sigma": 0.8
+    "gaussian_blur_sigma": 0.2
 }
 ```
 
@@ -149,27 +149,25 @@ The `merge` command makes use of a json configuration file which should be passe
 *   `min_zoom` (Optional, Default: `0`): The minimum zoom level to process.
 *   `max_zoom` (Optional, Default: uses max from last file): The maximum zoom level to process.
 *   `bounds` (Optional, Default: bounds of last file): A bounding box to limit the tiles being generated. Should be in the format: `[w,s,e,n]`
-*   `gaussian_blur_sigma` (Optional, Default: `0.8`): A floating-point value that controls the strength of the gaussian blur applied to source tiles during upscaling. 
+*   `gaussian_blur_sigma` (Optional, Default: `0.2`): A floating-point value that controls the base strength of the gaussian blur applied to source tiles during upscaling.  The actual blur applied is scaled based on the zoom level difference between the source and the output tile.
+
+    **Understanding Zoom-Level Dependent Blurring:**
+
+    The `gaussian_blur_sigma` parameter no longer directly represents the amount of blur applied. Instead, it serves as a *base* value for the blur. The actual amount of blurring is now *dynamically* adjusted based on the zoom level difference between the source tile and the target tile:
+
+    *   **Base Blur:** The `gaussian_blur_sigma` sets the starting point for how much blurring to apply.
+    *   **Dynamic Adjustment:** When a tile is upscaled, the amount of blurring is scaled by the absolute difference between the source zoom level and the target zoom level.  For example, if `gaussian_blur_sigma` is `0.2`, a tile that is upscaled by 2 zoom levels will have a sigma of 0.4 applied.
+    *   **Adaptive Smoothing:**  This means tiles that require significant upscaling receive more smoothing, reducing blockiness, while tiles that are closer to their target zoom receive less smoothing, preserving detail.
+   *  **Linear Scaling**: The blurring is scaled linearly by the zoom difference. This value can be changed by multiplying by a different number, and will be considered in later versions.
 
     **Choosing a `gaussian_blur_sigma` Value:**
 
-    The `gaussian_blur_sigma` parameter controls the amount of blurring applied to tiles when they are upscaled during the merge process. It's important to understand that there isn't a single "best" value; it depends on your source data and desired visual outcome. Here's a general guideline:
-
-    *   **Lower values (e.g., 0.5 or less):** Apply very little blurring. This may be suitable if your source data is already relatively smooth or if you want to preserve fine details, but it will not address the "bumpy" appearance of upscaled data.
-    *   **Medium values (e.g., 0.8 to 1.5):** Provide a good balance between smoothing and detail preservation. This is a good starting point and will help reduce the "bumpy" effect when upscaling lower-resolution tiles. The default value of `0.8` is a good choice for many cases.
-    *   **Higher values (e.g., 2.0 or more):** Apply more aggressive blurring, which smooths out the data significantly. This may be appropriate if your source data is very noisy or if you want a very smooth, generalized look, but may obscure some details in the process.
-
-    **How to Choose:**
-    *   **Start with the default (`0.8`):** This is a good starting point for many datasets.
-    *   **Experiment:** Generate a few test merges with different values (e.g. 0.5, 1.0, 1.5, and possibly 2.0) and examine the results visually.
-    *   **Consider your data:** If your source data is already smooth, you might need lower values. If it's noisy or has high-frequency details, higher values might be better.
-    *   **Prioritize your visual needs:** Do you want to see fine details in the terrain, or are you more concerned about eliminating the "bumpy" appearance?
-
-    Ultimately, the right value is the one that produces the visual results that are best for your specific use case. 
+    As the `gaussian_blur_sigma` now acts as a base value, a good start is to aim for the ideal smoothing at a single zoom difference. For example if you want 0.4 smoothing when the zoom difference is 2, then use 0.2.
+    Start with the default (`0.2`) and experiment, using higher values if the upscaling looks too "bumpy" or if you want more smoothing, and lower values if you think its too blurry.
 
 The merge logic works by merging the input sources in order, applying the height adjustment as it merges. The last input source will be the base layer for tiles, and the bounds of this last file will be used if no bounds are passed in.
 
 ## Merge Example
 ```
-rio merge --config config.json -j 24
+rio rgbify merge --config config.json -j 24
 ```
