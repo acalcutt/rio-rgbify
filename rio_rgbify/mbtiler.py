@@ -44,6 +44,7 @@ def process_tile(inpath, format, encoding, interval, base_val, round_digits, res
             toaffine = transform.from_bounds(*bounds + [512, 512])
 
             out = np.empty((512, 512), dtype=src.meta["dtype"])
+            logging.debug(f"out1 {out}")
             logging.debug(f"process_tile: About to reproject for tile {tile}")
 
             reproject(
@@ -56,7 +57,9 @@ def process_tile(inpath, format, encoding, interval, base_val, round_digits, res
             logging.debug(f"process_tile: Reprojected tile {tile}, out shape: {out.shape}")
             
             rgb = ImageEncoder.data_to_rgb(out, encoding, base_val, interval, round_digits, quantized_alpha)
+            logging.debug(f"rgb {rgb}")
             result = ImageEncoder.save_rgb_to_bytes(rgb, format) 
+            logging.debug(f"result {result}")
             logging.debug(f"process_tile: Encoded tile {tile}")
 
             return tile, result
