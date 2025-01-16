@@ -218,10 +218,10 @@ class RGBTiler:
             # generator of tiles to make
             if self.bounding_tile is None:
                 bbox = list(src.bounds)
-                tiles = self._make_tiles(bbox, src.crs, self.min_z, self.max_z)
+                tiles = list(self._make_tiles(bbox, src.crs, self.min_z, self.max_z))
             else:
                 constrained_bbox = list(mercantile.bounds(self.bounding_tile))
-                tiles = self._make_tiles(constrained_bbox, "EPSG:4326", self.min_z, self.max_z)
+                tiles = list(self._make_tiles(constrained_bbox, "EPSG:4326", self.min_z, self.max_z))
 
             total_tiles = len(list(tiles))
             print(f"Total tiles to process: {total_tiles}")
