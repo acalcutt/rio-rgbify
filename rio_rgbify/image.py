@@ -150,11 +150,11 @@ class ImageEncoder:
         table = []
         for i in range(0, 11):
             table.append(-11000 + i * 1000)
-        table.append(-100)
-        table.append(-50)
-        table.append(-20)
-        table.append(-10)
-        table.append(-1)
+            table.append(-100)
+            table.append(-50)
+            table.append(-20)
+            table.append(-10)
+            table.append(-1)
         for i in range(0, 150):
             table.append(20 * i)
         for i in range(0, 60):
