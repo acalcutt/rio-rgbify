@@ -212,16 +212,19 @@ class RGBTiler:
         """Main processing loop with smart process scaling"""
         print(f"self.inpath {self.inpath}")
         with rasterio.open(self.inpath) as src:
-            # generator of tiles to make
+             # generator of tiles to make
             if self.bounding_tile is None:
                 bbox = list(src.bounds)
-                tiles = self._make_tiles(bbox, src.crs, self.min_z, self.max_z)
+                tiles = list(self._make_tiles(bbox, src.crs, self.min_z, self.max_z)) # Force the generation of tiles to log them
             else:
                 constrained_bbox = list(mercantile.bounds(self.bounding_tile))
-                tiles = self._make_tiles(constrained_bbox, "EPSG:4326", self.min_z, self.max_z)
+                tiles = list(self._make_tiles(constrained_bbox, "EPSG:4326", self.min_z, self.max_z)) # Force the generation of tiles to log them
 
-        total_tiles = len(list(tiles))
+        total_tiles = len(tiles)
         print(f"Total tiles to process: {total_tiles}")
+
+        # Log the generated tiles
+        logging.debug(f"Tiles to Process {tiles}")
 
         # Smart process scaling - use fewer processes for fewer tiles
         if processes is None or processes <= 0:
@@ -265,10 +268,15 @@ class RGBTiler:
                 try:
                     total_processed = 0
                     for i, result in enumerate(pool.imap_unordered(process_func, tiles, chunksize=batch_size), 1):
+                        logging.debug(f"run: Got result: {result} from imap_unordered")
                         if result:
+                            tile, _ = result
+                            logging.debug(f"run: Inserting tile {tile} into database")
                             self.db.insert_tile_with_retry(*result, use_inverse_y=True)
                             total_processed += 1
                             print(f"Processed {total_processed}/{total_tiles} tiles")
+                        else:
+                            logging.warning(f"run:  Got None result from imap_unordered")
                             
                         if i % batch_size == 0 or i == total_tiles:  # Commit after each batch or at the end
                             self.db.conn.commit()
