@@ -16,7 +16,6 @@ from typing import Optional, Tuple, List, Dict
 from contextlib import contextmanager
 from rio_rgbify.database import MBTilesDatabase
 from rio_rgbify.image import ImageFormat, ImageEncoder
-from queue import QueueFV
 from scipy.ndimage import gaussian_filter # Import gaussian filter
 
 class EncodingType(Enum):
