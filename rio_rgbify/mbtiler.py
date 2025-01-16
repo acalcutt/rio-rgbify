@@ -27,10 +27,10 @@ def process_tile(inpath, format, encoding, interval, base_val, round_digits, res
     logging.info(f"Processing tile {tile} on CPU {proc.cpu_num()} (PID: {os.getpid()})")
     
     try:
-        logging.debug(f"process_tile: Attempting to open {inpath}")
+        print(f"process_tile: Attempting to open {inpath}")
         with rasterio.open(inpath) as src:
             x, y, z = tile
-            logging.debug(f"process_tile: Opened {inpath} for tile {tile}")
+            print(f"process_tile: Opened {inpath} for tile {tile}")
 
             bounds = [
                 c
@@ -44,8 +44,8 @@ def process_tile(inpath, format, encoding, interval, base_val, round_digits, res
             toaffine = transform.from_bounds(*bounds + [512, 512])
 
             out = np.empty((512, 512), dtype=src.meta["dtype"])
-            logging.debug(f"out1 {out}")
-            logging.debug(f"process_tile: About to reproject for tile {tile}")
+            print(f"out1 {out}")
+            print(f"process_tile: About to reproject for tile {tile}")
 
             reproject(
                 rasterio.band(src, 1),
@@ -54,13 +54,13 @@ def process_tile(inpath, format, encoding, interval, base_val, round_digits, res
                 dst_crs="EPSG:3857",
                 resampling=resampling,
             )
-            logging.debug(f"process_tile: Reprojected tile {tile}, out shape: {out.shape}")
+            print(f"process_tile: Reprojected tile {tile}, out shape: {out.shape}")
             
             rgb = ImageEncoder.data_to_rgb(out, encoding, base_val, interval, round_digits, quantized_alpha)
-            logging.debug(f"rgb {rgb}")
+            print(f"rgb {rgb}")
             result = ImageEncoder.save_rgb_to_bytes(rgb, format) 
-            logging.debug(f"result {result}")
-            logging.debug(f"process_tile: Encoded tile {tile}")
+            print(f"result {result}")
+            print(f"process_tile: Encoded tile {tile}")
 
             return tile, result
             
@@ -198,12 +198,12 @@ class RGBTiler:
         e -= EPSILON
         n -= EPSILON
         
-        logging.debug(f"_make_tiles: bbox {bbox}, src_crs {src_crs}, minz {minz}, maxz {maxz}")
+        print(f"_make_tiles: bbox {bbox}, src_crs {src_crs}, minz {minz}, maxz {maxz}")
 
 
         for z in range(minz, maxz + 1):
             for x, y in RGBTiler._tile_range(mercantile.tile(w, n, z), mercantile.tile(e, s, z)):
-                logging.debug(f"_make_tiles: yielding tile {x}/{y}/{z}")
+                print(f"_make_tiles: yielding tile {x}/{y}/{z}")
                 yield [x, y, z]
 
 
@@ -227,7 +227,7 @@ class RGBTiler:
         print(f"Total tiles to process: {total_tiles}")
 
         # Log the generated tiles
-        logging.debug(f"Tiles to Process {tiles}")
+        print(f"Tiles to Process {tiles}")
 
         # Smart process scaling - use fewer processes for fewer tiles
         if processes is None or processes <= 0:
@@ -271,10 +271,10 @@ class RGBTiler:
                 try:
                     total_processed = 0
                     for i, result in enumerate(pool.imap_unordered(process_func, tiles, chunksize=batch_size), 1):
-                        logging.debug(f"run: Got result: {result} from imap_unordered")
+                        print(f"run: Got result: {result} from imap_unordered")
                         if result:
                             tile, _ = result
-                            logging.debug(f"run: Inserting tile {tile} into database")
+                            print(f"run: Inserting tile {tile} into database")
                             self.db.insert_tile_with_retry(*result, use_inverse_y=True)
                             total_processed += 1
                             print(f"Processed {total_processed}/{total_tiles} tiles")
