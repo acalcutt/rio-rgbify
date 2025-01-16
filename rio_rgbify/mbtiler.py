@@ -27,8 +27,10 @@ def process_tile(inpath, format, encoding, interval, base_val, round_digits, res
     logging.info(f"Processing tile {tile} on CPU {proc.cpu_num()} (PID: {os.getpid()})")
     
     try:
+        logging.debug(f"process_tile: Attempting to open {inpath}")
         with rasterio.open(inpath) as src:
             x, y, z = tile
+            logging.debug(f"process_tile: Opened {inpath} for tile {tile}")
 
             bounds = [
                 c
@@ -42,6 +44,7 @@ def process_tile(inpath, format, encoding, interval, base_val, round_digits, res
             toaffine = transform.from_bounds(*bounds + [512, 512])
 
             out = np.empty((512, 512), dtype=src.meta["dtype"])
+            logging.debug(f"process_tile: About to reproject for tile {tile}")
 
             reproject(
                 rasterio.band(src, 1),
@@ -50,13 +53,17 @@ def process_tile(inpath, format, encoding, interval, base_val, round_digits, res
                 dst_crs="EPSG:3857",
                 resampling=resampling,
             )
+            logging.debug(f"process_tile: Reprojected tile {tile}, out shape: {out.shape}")
             
             rgb = ImageEncoder.data_to_rgb(out, encoding, base_val, interval, round_digits, quantized_alpha)
             result = ImageEncoder.save_rgb_to_bytes(rgb, format) 
+            logging.debug(f"process_tile: Encoded tile {tile}")
+
             return tile, result
             
     except Exception as e:
         logging.error(f"Error processing tile {tile}: {str(e)}")
+        logging.error(f"process_tile: Error for tile {tile}: {traceback.format_exc()}") # more details for the traceback
         return None
 
 class RGBTiler:
@@ -187,10 +194,15 @@ class RGBTiler:
         s += EPSILON
         e -= EPSILON
         n -= EPSILON
+        
+        logging.debug(f"_make_tiles: bbox {bbox}, src_crs {src_crs}, minz {minz}, maxz {maxz}")
+
 
         for z in range(minz, maxz + 1):
             for x, y in RGBTiler._tile_range(mercantile.tile(w, n, z), mercantile.tile(e, s, z)):
+                logging.debug(f"_make_tiles: yielding tile {x}/{y}/{z}")
                 yield [x, y, z]
+
 
     def _init_worker(self):
         signal.signal(signal.SIGINT, signal.SIG_IGN)
