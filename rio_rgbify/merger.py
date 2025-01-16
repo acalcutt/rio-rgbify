@@ -308,11 +308,10 @@ class TerrainRGBMerger:
             
             with rasterio.io.MemoryFile() as memfile:
                 with memfile.open(**tile_data.meta) as src:
-                    # Apply Gaussian blur to source data before reprojection
-                    blurred_data = gaussian_filter(tile_data.data, sigma=self.gaussian_blur_sigma)
+                    
                     dst_data = np.zeros((1, tile_size, tile_size), dtype=np.float32)
                     reproject(
-                        source=blurred_data,
+                        source=tile_data.data,
                         destination=dst_data,
                         src_transform=tile_data.meta['transform'],
                         src_crs=tile_data.meta['crs'],
@@ -320,11 +319,14 @@ class TerrainRGBMerger:
                         dst_crs=tile_data.meta['crs'],
                         resampling=self.resampling
                     )
+                    # Apply Gaussian blur to destination data after reprojection
+                    blurred_data = gaussian_filter(dst_data, sigma=self.gaussian_blur_sigma)
 
-                    if dst_data.ndim == 3:
-                        return dst_data[0]
+
+                    if blurred_data.ndim == 3:
+                        return blurred_data[0]
                     else:
-                        return dst_data
+                        return blurred_data
         if tile_data.data.ndim == 3:
             return tile_data.data[0]
         else:
