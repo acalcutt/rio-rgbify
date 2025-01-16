@@ -10,6 +10,7 @@ from rasterio.enums import Resampling
 from pathlib import Path
 from rio_rgbify.mbtiler import RGBTiler
 from rio_rgbify.merger import TerrainRGBMerger, MBTilesSource, EncodingType, ImageFormat
+from rio_rgbify.raster_merger import RasterRGBMerger, RasterSource
 from rio_rgbify.image import ImageEncoder
 from typing import Dict
 import sqlite3
@@ -143,7 +144,7 @@ def rgbify(
 
         if max_z < min_z:
             raise ValueError(
-                "Max zoom {0} must be greater than min zoom {1}".format(max_z, min_z)
+                "Max zoom  must be greater than min zoom ".format(max_z, min_z)
             )
 
         if bounding_tile is not None:
@@ -151,7 +152,7 @@ def rgbify(
                 bounding_tile = json.loads(bounding_tile)
             except Exception:
                 raise TypeError(
-                    "Bounding tile of {0} is not valid".format(bounding_tile)
+                    "Bounding tile of  is not valid".format(bounding_tile)
                 )
         
         resampling_enum = getattr(Resampling, resampling)
@@ -186,66 +187,144 @@ def rgbify(
     required=True,
     help="Path to the JSON configuration file",
 )
+@click.option(
+    "--bounding-tile",
+    type=str,
+    default=None,
+    help="Bounding tile '[, , ]' to limit output tiles, will be ignored if bounds are set in config",
+)
 @click.option("--workers", "-j", type=int, default=4, help="Workers to run [DEFAULT=4]")
 @click.option("--verbose", "-v", is_flag=True, default=False)
-def merge(config, workers, verbose):
-    """Merges multiple MBTiles files into one."""
+def merge(config, bounding_tile, workers, verbose):
+    """Merges multiple MBTiles or Raster files into one."""
     with open(config, "r") as f:
         config_data = json.load(f)
+    
+    source_type = config_data.get("source_type", "mbtiles")
+    if source_type == "mbtiles":
+        sources = []
+        source_connections = {}
+        for source_data in config_data.get("sources", []):
+            source = MBTilesSource(
+                path=Path(source_data["path"]),
+                encoding=EncodingType(source_data.get("encoding", "mapbox")),
+                height_adjustment=float(source_data.get("height_adjustment", 0.0)),
+                base_val=float(source_data.get("base_val",-10000)),
+                interval=float(source_data.get("interval",0.1)),
+                mask_values = source_data.get("mask_values",[0.0])
+            )
+            source_connections[source.path] = sqlite3.connect(source.path)
+            sources.append(source)
+        
+        output_path = Path(config_data.get("output_path", "output.mbtiles"))
+        output_encoding = EncodingType(config_data.get("output_encoding", "mapbox"))
+        output_format = ImageFormat(config_data.get("output_format", "png"))
+        resampling_str = config_data.get("resampling","bilinear")
+        if resampling_str.lower() not in ["nearest", "bilinear", "cubic", "cubic_spline", "lanczos", "average", "mode", "gauss"]:
+          raise ValueError(f"{resampling_str} is not a supported resampling method! ")
+        resampling = Resampling[resampling_str]
+        output_quantized_alpha = config_data.get("output_quantized_alpha", False)
+        min_zoom = config_data.get("min_zoom", 0)
+        max_zoom = config_data.get("max_zoom", None)
+        bounds = config_data.get("bounds", None)
+        gaussian_blur_sigma = config_data.get("gaussian_blur_sigma", 0.2)
+        
+        if bounds is not None:
+            try:
+              bounds = [float(x) for x in bounds]
+              if len(bounds) != 4:
+                raise ValueError("Bounds must be a list of 4 floats in the order west, south, east, north")
+            except Exception:
+                raise TypeError(
+                  "Bounding box of  is not valid, must be a comma seperated list of 4 floats in the order west, south, east, north".format(bounds)
+              )
+        elif bounding_tile is not None:
+             try:
+                bounding_tile = json.loads(bounding_tile)
+                bounds = list(mercantile.bounds(bounding_tile))
+             except Exception:
+                raise TypeError(
+                    "Bounding tile of  is not valid".format(bounding_tile)
+                )
 
-    sources = []
-    source_connections = {}
-    for source_data in config_data.get("sources", []):
-        source = MBTilesSource(
-            path=Path(source_data["path"]),
-            encoding=EncodingType(source_data.get("encoding", "mapbox")),
-            height_adjustment=float(source_data.get("height_adjustment", 0.0)),
-            base_val=float(source_data.get("base_val",-10000)),
-            interval=float(source_data.get("interval",0.1)),
-            mask_values = source_data.get("mask_values",[0.0])
-        )
-        source_connections[source.path] = sqlite3.connect(source.path)
-        sources.append(source)
-    
-    output_path = Path(config_data.get("output_path", "output.mbtiles"))
-    output_encoding = EncodingType(config_data.get("output_encoding", "mapbox"))
-    output_format = ImageFormat(config_data.get("output_format", "png"))
-    resampling_str = config_data.get("resampling","bilinear")
-    if resampling_str.lower() not in ["nearest", "bilinear", "cubic", "cubic_spline", "lanczos", "average", "mode", "gauss"]:
-      raise ValueError(f" is not a supported resampling method! {resampling_str}")
-    resampling = Resampling[resampling_str]
-    output_quantized_alpha = config_data.get("output_quantized_alpha", False)
-    min_zoom = config_data.get("min_zoom", 0)
-    max_zoom = config_data.get("max_zoom", None)
-    bounds = config_data.get("bounds", None)
-    gaussian_blur_sigma = config_data.get("gaussian_blur_sigma", 0.2)
-    
-    if bounds is not None:
-      try:
-        bounds = [float(x) for x in bounds]
-        if len(bounds) != 4:
-          raise ValueError("Bounds must be a list of 4 floats in the order west, south, east, north")
-      except Exception:
-        raise TypeError(
-          "Bounding box of  is not valid, must be a comma seperated list of 4 floats in the order west, south, east, north".format(bounds)
-        )
 
-    merger = TerrainRGBMerger(
-        sources = sources,
-        output_path = output_path,
-        output_encoding = output_encoding,
-        output_image_format = output_format,
-        resampling = resampling,
-        processes = workers,
-        output_quantized_alpha = output_quantized_alpha,
-        min_zoom = min_zoom,
-        max_zoom = max_zoom,
-        bounds = bounds,
-        gaussian_blur_sigma = gaussian_blur_sigma,
-    )
-    
-    try:
+        merger = TerrainRGBMerger(
+            sources = sources,
+            output_path = output_path,
+            output_encoding = output_encoding,
+            output_image_format = output_format,
+            resampling = resampling,
+            processes = workers,
+            output_quantized_alpha = output_quantized_alpha,
+            min_zoom = min_zoom,
+            max_zoom = max_zoom,
+            bounds = bounds,
+            gaussian_blur_sigma = gaussian_blur_sigma,
+        )
+        
+        try:
+            merger.process_all(min_zoom=min_zoom if min_zoom is not None else 0)
+        finally:
+            for conn in source_connections.values():
+              conn.close()
+
+    elif source_type == "raster":
+      
+        sources = []
+        for source_data in config_data.get("sources", []):
+            source = RasterSource(
+                path=Path(source_data["path"]),
+                height_adjustment=float(source_data.get("height_adjustment", 0.0)),
+                base_val=float(source_data.get("base_val",-10000)),
+                interval=float(source_data.get("interval",0.1)),
+                mask_values = source_data.get("mask_values",[0.0])
+            )
+            sources.append(source)
+
+        output_path = Path(config_data.get("output_path", "output.mbtiles"))
+        output_encoding = EncodingType(config_data.get("output_encoding", "mapbox"))
+        output_format = ImageFormat(config_data.get("output_format", "png"))
+        resampling_str = config_data.get("resampling","bilinear")
+        if resampling_str.lower() not in ["nearest", "bilinear", "cubic", "cubic_spline", "lanczos", "average", "mode", "gauss"]:
+            raise ValueError(f"{resampling_str} is not a supported resampling method!")
+        resampling = Resampling[resampling_str]
+        output_quantized_alpha = config_data.get("output_quantized_alpha", False)
+        min_zoom = config_data.get("min_zoom", 0)
+        max_zoom = config_data.get("max_zoom", None)
+        bounds = config_data.get("bounds", None)
+        gaussian_blur_sigma = config_data.get("gaussian_blur_sigma", 0.2)
+
+        if bounds is not None:
+            try:
+                bounds = [float(x) for x in bounds]
+                if len(bounds) != 4:
+                    raise ValueError("Bounds must be a list of 4 floats in the order west, south, east, north")
+            except Exception:
+                raise TypeError(
+                    "Bounding box of  is not valid, must be a comma seperated list of 4 floats in the order west, south, east, north".format(bounds)
+                )
+        elif bounding_tile is not None:
+             try:
+                bounding_tile = json.loads(bounding_tile)
+                bounds = list(mercantile.bounds(bounding_tile))
+             except Exception:
+                raise TypeError(
+                    "Bounding tile of  is not valid".format(bounding_tile)
+                )
+        
+        merger = RasterRGBMerger(
+            sources = sources,
+            output_path = output_path,
+            output_encoding = output_encoding,
+            output_image_format = output_format,
+            resampling = resampling,
+            processes = workers,
+            output_quantized_alpha = output_quantized_alpha,
+            min_zoom = min_zoom,
+            max_zoom = max_zoom,
+            bounds = bounds,
+            gaussian_blur_sigma = gaussian_blur_sigma,
+        )
         merger.process_all(min_zoom=min_zoom if min_zoom is not None else 0)
-    finally:
-        for conn in source_connections.values():
-            conn.close()
+    else:
+        raise ValueError(f"Source type {source_type} not supported")
