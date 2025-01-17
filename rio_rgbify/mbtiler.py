@@ -223,7 +223,7 @@ class RGBTiler:
                 constrained_bbox = list(mercantile.bounds(self.bounding_tile))
                 tiles = list(self._make_tiles(constrained_bbox, "EPSG:4326", self.min_z, self.max_z))
 
-            total_tiles = len(list(tiles))
+            total_tiles = len(tiles)
             print(f"Total tiles to process: {total_tiles}")
 
             # Smart process scaling - use fewer processes for fewer tiles
