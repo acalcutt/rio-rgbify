@@ -425,7 +425,7 @@ class TerrainRGBMerger:
         
         return list(tiles)
 
-    def process_zoom_level(self, zoom: int):
+    def process_zoom_level(self, zoom: int, verbose):
         """Process all tiles for a given zoom level in parallel"""
         self.logger.info(f"Processing zoom level ")
         source_conns = {}
@@ -446,7 +446,8 @@ class TerrainRGBMerger:
                 self.output_encoding.value,
                 self.resampling,
                 self.output_image_format.value,
-                self.output_quantized_alpha
+                self.output_quantized_alpha,
+                verbose
             )
             for tile in tiles
         ]
@@ -504,7 +505,7 @@ class TerrainRGBMerger:
             max_zoom = result[0] if result and result[0] is not None else 0
             return max_zoom
 
-    def process_all(self, min_zoom: int = 0):
+    def process_all(self, min_zoom: int = 0, verbose):
         """Process all zoom levels"""
         max_zoom = self.max_zoom if self.max_zoom is not None else self.get_max_zoom_level()
         self.logger.info(f"Processing zoom levels {min_zoom} to {max_zoom}")
@@ -514,22 +515,22 @@ class TerrainRGBMerger:
 
 
         for zoom in range(min_zoom, max_zoom + 1):
-             self.process_zoom_level(zoom)
+             self.process_zoom_level(zoom, verbose)
 
         self.logger.info("Completed processing all zoom levels")
 
 @retry(attempts=5, base_delay=0.5, max_delay=5)
 def process_tile_task(task_tuple: tuple) -> None:
     """Standalone function for processing tiles that can be pickled"""
-    tile, source_configs, output_path, output_encoding, resampling, output_format, output_alpha = task_tuple
+    tile, source_configs, output_path, output_encoding, resampling, output_format, output_alpha, verbose = task_tuple
     
     # Configure logging for each process
     logging.basicConfig(
         level=logging.DEBUG,
         format='%(asctime)s - %(name)s - %(levelname)s - %(message)s'
     )
-    logger = logging.getLogger(__name__)
-    logger.debug(f"process_tile_task started for tile {tile.z}/{tile.x}/{tile.y}")
+
+    print(f"process_tile_task started for tile {tile.z}/{tile.x}/{tile.y}")
     
     source_conns = {}
     sources = []
@@ -560,14 +561,16 @@ def process_tile_task(task_tuple: tuple) -> None:
                 tile_datas.append(tile_data)
 
             if not any(tile_datas):
-                logging.debug(f"No tile data for {tile.z}/{tile.x}/{tile.y}")
+                if verbose:
+                    print(f"No tile data for {tile.z}/{tile.x}/{tile.y}")
                 return
 
             # Merge the elevation data
             merged_elevation = merger_instance._merge_tiles(tile_datas, tile)
             
             if merged_elevation is None:
-                logging.debug(f"No merged elevation {tile.z}/{tile.x}/{tile.y}")
+                if verbose:
+                    print(f"No merged elevation {tile.z}/{tile.x}/{tile.y}")
                 return
             
             # Encode using output format
@@ -579,13 +582,14 @@ def process_tile_task(task_tuple: tuple) -> None:
                 quantized_alpha=output_alpha
             )
             image_bytes = ImageEncoder.save_rgb_to_bytes(rgb_data, output_format)
-            logging.debug(f"image_bytes {len(image_bytes)}")
+            if verbose:
+                print(f"image_bytes {len(image_bytes)}")
             # Write to output database
             db.insert_tile_with_retry([tile.x, tile.y, tile.z], image_bytes)
 
 
     except Exception as e:
-        logging.error(f"Error processing tile {tile.z}/{tile.x}/{tile.y}: {e}")
+        print(f"Error processing tile {tile.z}/{tile.x}/{tile.y}: {e}")
         raise
     finally:
         # Clean up connections
