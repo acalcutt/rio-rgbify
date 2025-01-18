@@ -1,3 +1,4 @@
+import sqlite3
 import rasterio
 import mercantile
 from rasterio.warp import reproject, Resampling
