@@ -24,11 +24,11 @@ def main_group():
 @click.argument("inpath", type=click.Path(exists=True))
 @click.argument("outpath", type=str)
 @click.option(
-    "-z", "--min-zoom", type=int, default=0,
+    "-z", "--min-z", type=int, default=0,
     help="Minimum zoom level to generate."
 )
 @click.option(
-    "-Z", "--max-zoom", type=int, default=None,
+    "-Z", "--max-z", type=int, default=None,
     help="Maximum zoom level to generate."
 )
 @click.option(
@@ -67,10 +67,6 @@ def main_group():
     "--resampling", type=click.Choice(["nearest", "bilinear", "cubic", "cubic_spline", "lanczos", "average", "mode", "gaussian"], case_sensitive=False), default="nearest",
     help="Resampling method"
 )
-@click.option(
-    "--quantized-alpha", type=bool, default=True,
-    help="If set to true and using terrarium output encoding, the alpha channel will be populated with quantized data"
-)
 def rgbify(inpath, outpath, min_zoom, max_zoom, bounding_tile, workers, batch_size, interval, baseval, round_digits, encoding, format, resampling, quantized_alpha):
     """Create RGB encoded tiles from a raster file."""
     try:
@@ -87,7 +83,6 @@ def rgbify(inpath, outpath, min_zoom, max_zoom, bounding_tile, workers, batch_si
             encoding=encoding,
             format=format,
             resampling=resampling,
-            quantized_alpha=quantized_alpha,
             bounding_tile=bounding_tile
         ) as tiler:
             tiler.run(processes=workers, batch_size=batch_size)
