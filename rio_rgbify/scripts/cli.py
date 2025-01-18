@@ -154,8 +154,8 @@ def merge(config, workers, batch_size, min_zoom):
         merger = TerrainRGBMerger(
             sources,
             output_path=config.get('output_path', 'output.mbtiles'),
-            output_encoding=EncodingType(config.get('output_encoding', "mapbox").upper()),
-            output_image_format=ImageFormat(config.get('output_format', 'webp').upper()),
+            output_encoding=EncodingType(config.get('output_encoding', "mapbox").lower()),
+            output_image_format=ImageFormat(config.get('output_format', 'webp').lower()),
             resampling=Resampling[config.get('resampling', 'lanczos').lower()],
             output_quantized_alpha=config.get('output_quantized_alpha', False),
             min_zoom=min_zoom if min_zoom is not None else config.get("min_zoom", 0),
@@ -168,8 +168,8 @@ def merge(config, workers, batch_size, min_zoom):
         merger = RasterRGBMerger(
             sources,
             output_path=config.get('output_path', 'output.mbtiles'),
-            output_encoding=EncodingType(config.get('output_encoding', "mapbox").upper()),
-            output_image_format=ImageFormat(config.get('output_format', 'webp').upper()),
+            output_encoding=EncodingType(config.get('output_encoding', "mapbox").lower()),
+            output_image_format=ImageFormat(config.get('output_format', 'webp').lower()),
             resampling=Resampling[config.get('resampling', 'lanczos').lower()],
             output_quantized_alpha=config.get('output_quantized_alpha', False),
             min_zoom=min_zoom if min_zoom is not None else config.get("min_zoom", 0),
