@@ -44,19 +44,19 @@ def main_group():
     help="Number of tiles to process at a time in each process."
 )
 @click.option(
-    "--interval", type=float, default=1,
+    "-i", "--interval", type=float, default=1,
     help="The interval at which to encode"
 )
 @click.option(
-    "--baseval", type=float, default=0,
+    "-b", "--baseval", type=float, default=0,
     help="The base value of the RGB numbering system"
 )
 @click.option(
-    "--round-digits", type=int, default=0,
+    "-r", "--round-digits", type=int, default=0,
     help="Erase less significant digits"
 )
 @click.option(
-    "--encoding", type=click.Choice(["mapbox", "terrarium"], case_sensitive=False), default="mapbox",
+    "-e", "--encoding", type=click.Choice(["mapbox", "terrarium"], case_sensitive=False), default="mapbox",
     help="Output tile encoding"
 )
 @click.option(
