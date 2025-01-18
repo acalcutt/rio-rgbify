@@ -231,6 +231,9 @@ class RGBTiler:
                 constrained_bbox = list(mercantile.bounds(self.bounding_tile))
                 tiles = list(self._make_tiles(constrained_bbox, "EPSG:4326", self.min_z, self.max_z, verbose = verbose))
 
+            print(f"Type of tiles: {type(tiles)}")
+            print(f"tiles before sending to imap: {tiles[0:10]}") #print the first 10 tiles
+
             total_tiles = len(tiles)
             print(f"Total tiles to process: {total_tiles}")
 
