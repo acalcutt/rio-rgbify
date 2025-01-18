@@ -8,9 +8,7 @@ from rio_rgbify.raster_merger import RasterRGBMerger, RasterSource
 from rio_rgbify.image import ImageFormat
 from rasterio.enums import Resampling
 
-
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
-
 
 @click.group(
     context_settings=dict(help_option_names=["-h", "--help"])
@@ -79,6 +77,10 @@ def main_group():
 )
 @click.option("--workers", "-j", type=int, default=4, help="Workers to run [DEFAULT=4]")
 @click.option("--verbose", "-v", is_flag=True, default=False)
+@click.option(
+    "--batch-size", type=int, default=None,
+    help="Number of tiles to process at a time in each process."
+)
 # @click.pass_context
 # @creation_options
 def rgbify(
@@ -95,6 +97,7 @@ def rgbify(
     format,
     workers,
     verbose,
+    batch_size
 ):
     """rio-rgbify cli."""
 
@@ -127,7 +130,7 @@ def rgbify(
         max_z=max_z,
         min_z=min_z,
     ) as tiler:
-        tiler.run(workers)
+        tiler.run(workers, batch_size = batch_size)
 
 
 
@@ -145,15 +148,12 @@ def rgbify(
     "-j", "--workers", type=int, default=None,
     help="Number of processes to use for parallel execution."
 )
-@click.option(
-    "--batch-size", type=int, default=None,
-    help="Number of tiles to process at a time in each process."
-)
+
 @click.option(
     "-z", "--min-zoom", type=int, default=None,
     help="Minimum zoom level to generate."
 )
-def merge(config, output_path, workers, batch_size, min_zoom):
+def merge(config, output_path, workers, min_zoom):
     """Merge multiple MBTiles files."""
     try:
         with open(config) as f:
