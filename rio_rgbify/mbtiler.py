@@ -234,7 +234,6 @@ class RGBTiler:
             else:
                 constrained_bbox = list(mercantile.bounds(self.bounding_tile))
                 tiles = list(self._make_tiles(constrained_bbox, "EPSG:4326", self.min_z, self.max_z, verbose = verbose))
-
             print(f"Type of tiles: {type(tiles)}")
             print(f"tiles before sending to imap: {tiles[0:10]}") #print the first 10 tiles
 
@@ -244,14 +243,14 @@ class RGBTiler:
             # Smart process scaling - use fewer processes for fewer tiles
             if processes is None or processes <= 0:
                 # Scale processes based on tile count and CPU count
-                processes = cpu_count() - 1  # Leave one CPU free
+                processes = cpu_count() - 1   # Leave one CPU free
             
             # Ensure processes does not exceed tile count
             processes = min(total_tiles, processes)
 
             # Adjust batch size based on total tiles
             if batch_size is None:
-                batch_size = max(1, total_tiles // (processes * 2))  # Ensure at least 1
+                batch_size = max(1, total_tiles // (processes * 2))   # Ensure at least 1
             
             print(f"Running with {processes} processes and batch size of {batch_size}")
 
@@ -268,7 +267,7 @@ class RGBTiler:
             self.round_digits,
             self.resampling,
             self.quantized_alpha,
-            verbose
+            verbose=verbose # Changed to keyword argument
         )
 
         with self.db:
@@ -288,8 +287,8 @@ class RGBTiler:
                             self.db.insert_tile_with_retry(*result, use_inverse_y=True)
                             total_processed += 1
                             print(f"Processed {total_processed}/{total_tiles} tiles")
-                            
-                        if i % batch_size == 0 or i == total_tiles:  # Commit after each batch or at the end
+                        
+                        if i % batch_size == 0 or i == total_tiles:   # Commit after each batch or at the end
                             self.db.conn.commit()
                             print("Committed to database")
 
