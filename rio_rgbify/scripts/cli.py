@@ -2,15 +2,12 @@ import click
 import logging
 from pathlib import Path
 import json
-from rio_rgbify.scripts.mbtiler import RGBTiler
+from rio_rgbify.mbtiler import RGBTiler
 from rio_rgbify.merger import TerrainRGBMerger, MBTilesSource, EncodingType
 from rio_rgbify.raster_merger import RasterRGBMerger, RasterSource
 from rio_rgbify.image import ImageFormat
-import rasterio
 from rasterio.enums import Resampling
 from typing import List
-import multiprocessing
-import psutil
 
 
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
@@ -159,7 +156,7 @@ def merge(config, workers, batch_size, min_zoom):
             output_path=config.get('output_path', 'output.mbtiles'),
             output_encoding=EncodingType(config.get('output_encoding', "mapbox").upper()),
             output_image_format=ImageFormat(config.get('output_format', 'webp').upper()),
-            resampling=Resampling(config.get('resampling', 'lanczos').upper()),
+            resampling=Resampling[config.get('resampling', 'lanczos').lower()],
             output_quantized_alpha=config.get('output_quantized_alpha', False),
             min_zoom=min_zoom if min_zoom is not None else config.get("min_zoom", 0),
             max_zoom=config.get("max_zoom", None),
@@ -173,7 +170,7 @@ def merge(config, workers, batch_size, min_zoom):
             output_path=config.get('output_path', 'output.mbtiles'),
             output_encoding=EncodingType(config.get('output_encoding', "mapbox").upper()),
             output_image_format=ImageFormat(config.get('output_format', 'webp').upper()),
-            resampling=Resampling(config.get('resampling', 'lanczos').upper()),
+            resampling=Resampling[config.get('resampling', 'lanczos').lower()],
             output_quantized_alpha=config.get('output_quantized_alpha', False),
             min_zoom=min_zoom if min_zoom is not None else config.get("min_zoom", 0),
             max_zoom=config.get("max_zoom", None),
