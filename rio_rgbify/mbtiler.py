@@ -25,7 +25,11 @@ def process_tile(inpath, format, encoding, interval, base_val, round_digits, res
     # Log the process ID and CPU core
     proc = psutil.Process()
     if verbose:
-      logging.info(f"Processing tile {tile} on CPU {proc.cpu_num()} (PID: {os.getpid()})")
+        logging.info(f"Processing tile  on CPU {proc.cpu_num()} (PID: {os.getpid()})")
+    
+    if not isinstance(tile, (tuple,list)):
+        logging.error(f"process_tile: Invalid tile type: {type(tile)}. Value: {tile}")
+        return None
     
     try:
         if verbose:
