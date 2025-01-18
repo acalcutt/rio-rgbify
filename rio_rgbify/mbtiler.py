@@ -171,23 +171,6 @@ class RGBTiler:
         """
         Given a bounding box, zoom range, and source crs,
         find all tiles that would intersect
-
-        Parameters
-        -----------
-        bbox: list
-            [w, s, e, n] bounds
-        src_crs: str
-            the source crs of the input bbox
-        minz: int
-            minumum zoom to find tiles for
-        maxz: int
-            maximum zoom to find tiles for
-
-        Returns
-        --------
-        tiles: generator
-            generator of [x, y, z] tiles that intersect
-            the provided bounding box
         """
         w, s, e, n = transform_bounds(*[src_crs, "EPSG:4326"] + bbox)
 
@@ -197,14 +180,19 @@ class RGBTiler:
         s += EPSILON
         e -= EPSILON
         n -= EPSILON
-        
-        print(f"_make_tiles: bbox {bbox}, src_crs {src_crs}, minz {minz}, maxz {maxz}")
 
-
+        all_tiles = []
         for z in range(minz, maxz + 1):
+            tiles_at_zoom = []
             for x, y in RGBTiler._tile_range(mercantile.tile(w, n, z), mercantile.tile(e, s, z)):
-                print(f"_make_tiles: yielding tile {x}/{y}/{z}")
-                yield [x, y, z]
+                tiles_at_zoom.append([x, y, z])
+            all_tiles.extend(tiles_at_zoom)
+            
+        # Sort the tiles by z, then x, then y
+        all_tiles.sort(key=lambda tile: (tile[2], tile[0], tile[1]))
+            
+        for tile in all_tiles:
+           yield tile
 
 
     def _init_worker(self):
