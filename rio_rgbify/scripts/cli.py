@@ -81,6 +81,10 @@ def main_group():
     "--batch-size", type=int, default=None,
     help="Number of tiles to process at a time in each process."
 )
+@click.option(
+    "--resampling", type=click.Choice(["nearest", "bilinear", "cubic", "cubic_spline", "lanczos", "average", "mode", "gaussian"], case_sensitive=False), default="nearest",
+    help="Resampling method"
+)
 # @click.pass_context
 # @creation_options
 def rgbify(
@@ -97,7 +101,8 @@ def rgbify(
     format,
     workers,
     verbose,
-    batch_size
+    batch_size,
+    resampling
 ):
     """rio-rgbify cli."""
 
@@ -116,7 +121,9 @@ def rgbify(
             raise TypeError(
                 "Bounding tile of {0} is not valid".format(bounding_tile)
             )
-
+    
+    resampling_enum = Resampling[resampling.lower()]
+    
 
     with RGBTiler(
         src_path,
@@ -129,11 +136,9 @@ def rgbify(
         bounding_tile=bounding_tile,
         max_z=max_z,
         min_z=min_z,
+         resampling=resampling_enum,
     ) as tiler:
         tiler.run(workers, batch_size = batch_size)
-
-
-
 
 @main_group.command('merge', short_help='Merge multiple MBTiles or Raster files.')
 @click.option(
