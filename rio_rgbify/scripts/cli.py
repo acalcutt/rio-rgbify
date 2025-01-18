@@ -67,7 +67,7 @@ def main_group():
     "--resampling", type=click.Choice(["nearest", "bilinear", "cubic", "cubic_spline", "lanczos", "average", "mode", "gaussian"], case_sensitive=False), default="nearest",
     help="Resampling method"
 )
-def rgbify(inpath, outpath, min_zoom, max_zoom, bounding_tile, workers, batch_size, interval, baseval, round_digits, encoding, format, resampling, quantized_alpha):
+def rgbify(inpath, outpath, min_z, max_z, bounding_tile, workers, batch_size, interval, baseval, round_digits, encoding, format, resampling):
     """Create RGB encoded tiles from a raster file."""
     try:
         if bounding_tile is not None:
@@ -75,8 +75,8 @@ def rgbify(inpath, outpath, min_zoom, max_zoom, bounding_tile, workers, batch_si
         with RGBTiler(
             inpath,
             outpath,
-            min_zoom,
-            max_zoom,
+            min_z,
+            max_z,
             interval=interval,
             base_val=baseval,
             round_digits=round_digits,
