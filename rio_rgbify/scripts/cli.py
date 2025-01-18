@@ -132,7 +132,7 @@ def merge(config, workers, batch_size, min_zoom):
             sources.append(
                 MBTilesSource(
                     path=Path(source["path"]),
-                    encoding=EncodingType(source.get("encoding", "mapbox").upper()),
+                    encoding=EncodingType(source.get("encoding", "mapbox").lower()),
                     height_adjustment=source.get("height_adjustment", 0.0),
                     base_val=source.get("base_val", -10000),
                     interval=source.get("interval", 0.1),
