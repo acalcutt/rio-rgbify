@@ -509,25 +509,12 @@ class TerrainRGBMerger:
         max_zoom = self.max_zoom if self.max_zoom is not None else self.get_max_zoom_level()
         self.logger.info(f"Processing zoom levels {min_zoom} to {max_zoom}")
 
-        if self.bounds is None:
-             source = self.sources[-1]
-             with sqlite3.connect(source.path) as conn:
-                cursor = conn.cursor()
-                cursor.execute("SELECT MIN(tile_column), MIN(tile_row), MAX(tile_column), MAX(tile_row), zoom_level FROM tiles ORDER BY zoom_level DESC LIMIT 1")
-                result = cursor.fetchone()
-                
-                if result:
-                  min_x, min_y, max_x, max_y, zoom = result
-                  bounds = mercantile.bounds(mercantile.Tile(min_x,min_y,zoom))
-                  bounds2 = mercantile.bounds(mercantile.Tile(max_x,max_y,zoom))
-                  self.bounds = [bounds.west, bounds2.south, bounds2.east, bounds.north]
-        
+        with MBTilesDatabase(self.output_path) as db:
+             db.add_bounds_center_metadata(self.bounds, self.min_zoom, max_zoom, self.output_encoding.value, self.output_image_format.value, "Merged Terrain")
 
-        with MBTilesDatabase(self.output_path) as db: # Added database context for metadata
-            db.add_bounds_center_metadata(self.bounds, self.min_zoom, max_zoom, self.output_encoding.value, self.output_image_format.value, "Merged Terrain")
 
         for zoom in range(min_zoom, max_zoom + 1):
-            self.process_zoom_level(zoom)
+             self.process_zoom_level(zoom)
 
         self.logger.info("Completed processing all zoom levels")
 
