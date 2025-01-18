@@ -505,7 +505,7 @@ class TerrainRGBMerger:
             max_zoom = result[0] if result and result[0] is not None else 0
             return max_zoom
 
-    def process_all(self, min_zoom: int = 0, verbose):
+    def process_all(self, min_zoom: int = 0, verbose = False):
         """Process all zoom levels"""
         max_zoom = self.max_zoom if self.max_zoom is not None else self.get_max_zoom_level()
         self.logger.info(f"Processing zoom levels {min_zoom} to {max_zoom}")
