@@ -150,7 +150,7 @@ def rgbify(
         min_z=min_z,
          resampling=resampling_enum,
     ) as tiler:
-        tiler.run(processes=workers, batch_size = batch_size, verbose = verbose)
+        tiler.run(workers, batch_size = batch_size, verbose = verbose)
 
 
 
@@ -168,12 +168,8 @@ def rgbify(
     "-j", "--workers", type=int, default=None,
     help="Number of processes to use for parallel execution."
 )
-
-@click.option(
-    "-z", "--min-zoom", type=int, default=None,
-    help="Minimum zoom level to generate."
-)
-def merge(config, output_path, workers, min_zoom):
+@click.option("--verbose", "-v", is_flag=True, default=False)
+def merge(config, output_path, workers, verbose):
     """Merge multiple MBTiles files."""
     try:
         with open(config) as f:
@@ -223,7 +219,7 @@ def merge(config, output_path, workers, min_zoom):
                 output_image_format=ImageFormat(config.get('output_format', 'webp').lower()),
                 resampling=Resampling[config.get('resampling', 'lanczos').lower()],
                 output_quantized_alpha=config.get('output_quantized_alpha', False),
-                min_zoom=min_zoom if min_zoom is not None else config.get("min_zoom", 0),
+                min_zoom= config.get("min_zoom", 0),
                 max_zoom=config.get("max_zoom", None),
                 bounds=config.get("bounds", None),
                 gaussian_blur_sigma=config.get("gaussian_blur_sigma", 0.2),
@@ -237,7 +233,7 @@ def merge(config, output_path, workers, min_zoom):
                 output_image_format=ImageFormat(config.get('output_format', 'webp').lower()),
                 resampling=Resampling[config.get('resampling', 'lanczos').lower()],
                 output_quantized_alpha=config.get('output_quantized_alpha', False),
-                min_zoom=min_zoom if min_zoom is not None else config.get("min_zoom", 0),
+                min_zoom= config.get("min_zoom", 0),
                 max_zoom=config.get("max_zoom", None),
                 bounds=config.get("bounds", None),
                 gaussian_blur_sigma=config.get("gaussian_blur_sigma", 0.2),
@@ -245,7 +241,7 @@ def merge(config, output_path, workers, min_zoom):
             )
 
 
-        merger.process_all(min_zoom=min_zoom if min_zoom is not None else 0)
+        merger.process_all(min_zoom=config.get("min_zoom", 0), verbose = verbose)
     except Exception as e:
         logging.error(f"An error occured: {e}")
 
