@@ -244,7 +244,7 @@ class RGBTiler:
         )
 
         with self.db:
-            
+          
             if self.bounding_tile is None:
                 bbox = list(src.bounds)
                 self.db.add_bounds_center_metadata(bbox, self.min_z, self.max_z, self.encoding, self.format, "Terrain")
@@ -255,7 +255,7 @@ class RGBTiler:
             with ctx.Pool(processes, initializer=self._init_worker) as pool:
                 try:
                     total_processed = 0
-                    for i, result in enumerate(pool.imap(process_func, tiles, chunksize=batch_size), 1):
+                    for i, result in enumerate(pool.imap_unordered(process_func, tiles, chunksize=batch_size), 1):
                         if result:
                             self.db.insert_tile_with_retry(*result, use_inverse_y=True)
                             total_processed += 1
