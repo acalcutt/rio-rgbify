@@ -20,17 +20,20 @@ import psutil
 
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
 
-def process_tile(inpath, format, encoding, interval, base_val, round_digits, resampling, quantized_alpha, tile):
+def process_tile(inpath, format, encoding, interval, base_val, round_digits, resampling, quantized_alpha, tile, verbose):
     """Standalone tile processing function"""
     # Log the process ID and CPU core
     proc = psutil.Process()
-    logging.info(f"Processing tile {tile} on CPU {proc.cpu_num()} (PID: {os.getpid()})")
+    if verbose:
+      logging.info(f"Processing tile {tile} on CPU {proc.cpu_num()} (PID: {os.getpid()})")
     
     try:
-        print(f"process_tile: Attempting to open {inpath}")
+        if verbose:
+            print(f"process_tile: Attempting to open {inpath}")
         with rasterio.open(inpath) as src:
             x, y, z = tile
-            print(f"process_tile: Opened {inpath} for tile {tile}")
+            if verbose:
+              print(f"process_tile: Opened {inpath} for tile {tile}")
 
             bounds = [
                 c
@@ -44,7 +47,8 @@ def process_tile(inpath, format, encoding, interval, base_val, round_digits, res
             toaffine = transform.from_bounds(*bounds + [512, 512])
 
             out = np.empty((512, 512), dtype=src.meta["dtype"])
-            print(f"process_tile: About to reproject for tile {tile}")
+            if verbose:
+                print(f"process_tile: About to reproject for tile {tile}")
 
             reproject(
                 rasterio.band(src, 1),
@@ -53,14 +57,17 @@ def process_tile(inpath, format, encoding, interval, base_val, round_digits, res
                 dst_crs="EPSG:3857",
                 resampling=resampling,
             )
-            print(f"process_tile: Reprojected tile {tile}, out shape: {out.shape}")
-            print(f"process_tile: data before data_to_rgb: min={np.nanmin(out)}, max={np.nanmax(out)}, type: {out.dtype}")
+            if verbose:
+              print(f"process_tile: Reprojected tile {tile}, out shape: {out.shape}")
+              print(f"process_tile: data before data_to_rgb: min={np.nanmin(out)}, max={np.nanmax(out)}, type: {out.dtype}")
 
             rgb = ImageEncoder.data_to_rgb(out, encoding, interval, base_val, round_digits, quantized_alpha)
-            print(f"process_tile: data after data_to_rgb: min={np.nanmin(rgb)}, max={np.nanmax(rgb)}, type: {rgb.dtype}")
+            if verbose:
+              print(f"process_tile: data after data_to_rgb: min={np.nanmin(rgb)}, max={np.nanmax(rgb)}, type: {rgb.dtype}")
             result = ImageEncoder.save_rgb_to_bytes(rgb, format)
             
-            print(f"process_tile: Encoded tile {tile}")
+            if verbose:
+              print(f"process_tile: Encoded tile {tile}")
 
             return tile, result
             
@@ -167,7 +174,7 @@ class RGBTiler:
 
         return itertools.product(range(min_x, max_x + 1), range(min_y, max_y + 1))
 
-    def _make_tiles(self, bbox, src_crs, minz, maxz):
+    def _make_tiles(self, bbox, src_crs, minz, maxz, verbose=False):
         """
         Given a bounding box, zoom range, and source crs,
         find all tiles that would intersect
@@ -198,30 +205,31 @@ class RGBTiler:
         e -= EPSILON
         n -= EPSILON
         
-        print(f"_make_tiles: bbox {bbox}, src_crs {src_crs}, minz {minz}, maxz {maxz}")
+        print(f"_make_tiles: bbox: {bbox}, src_crs: {src_crs}, minz: {minz}, maxz: {maxz}")
 
 
         for z in range(minz, maxz + 1):
             for x, y in RGBTiler._tile_range(mercantile.tile(w, n, z), mercantile.tile(e, s, z)):
-                print(f"_make_tiles: yielding tile {x}/{y}/{z}")
-                yield [x, y, z]
+              if verbose:
+                print(f"_make_tiles: yielding tile {x}, {y}, {z}")
+              yield [x, y, z]
 
 
     def _init_worker(self):
         signal.signal(signal.SIGINT, signal.SIG_IGN)
 
 
-    def run(self, processes=None, batch_size=None):
+    def run(self, processes=None, batch_size=None, verbose=False):
         """Main processing loop with smart process scaling"""
         print(f"self.inpath {self.inpath}")
         with rasterio.open(self.inpath) as src:
             # generator of tiles to make
             if self.bounding_tile is None:
                 bbox = list(src.bounds)
-                tiles = list(self._make_tiles(bbox, src.crs, self.min_z, self.max_z))
+                tiles = list(self._make_tiles(bbox, src.crs, self.min_z, self.max_z, verbose = verbose))
             else:
                 constrained_bbox = list(mercantile.bounds(self.bounding_tile))
-                tiles = list(self._make_tiles(constrained_bbox, "EPSG:4326", self.min_z, self.max_z))
+                tiles = list(self._make_tiles(constrained_bbox, "EPSG:4326", self.min_z, self.max_z, verbose = verbose))
 
             total_tiles = len(tiles)
             print(f"Total tiles to process: {total_tiles}")
@@ -253,10 +261,11 @@ class RGBTiler:
             self.round_digits,
             self.resampling,
             self.quantized_alpha,
+            verbose
         )
 
         with self.db:
-          
+            
             if self.bounding_tile is None:
                 bbox = list(src.bounds)
                 self.db.add_bounds_center_metadata(bbox, self.min_z, self.max_z, self.encoding, self.format, "Terrain")

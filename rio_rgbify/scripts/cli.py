@@ -7,8 +7,20 @@ from rio_rgbify.merger import TerrainRGBMerger, MBTilesSource, EncodingType
 from rio_rgbify.raster_merger import RasterRGBMerger, RasterSource
 from rio_rgbify.image import ImageFormat
 from rasterio.enums import Resampling
+from typing import List
+import rasterio as rio
+import numpy as np
+#from riomucho import RioMucho # Removed riomucho import
+
 
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
+
+
+# def _rgb_worker(data, window, ij, g_args): # Removed _rgb_worker function
+#     return data_to_rgb(
+#         data[0][g_args["bidx"] - 1], g_args["encoding"], g_args["base_val"], g_args["interval"], g_args["round_digits"]
+#     )
+
 
 @click.group(
     context_settings=dict(help_option_names=["-h", "--help"])
@@ -138,7 +150,10 @@ def rgbify(
         min_z=min_z,
          resampling=resampling_enum,
     ) as tiler:
-        tiler.run(workers, batch_size = batch_size)
+        tiler.run(processes=workers, batch_size = batch_size, verbose = verbose)
+
+
+
 
 @main_group.command('merge', short_help='Merge multiple MBTiles or Raster files.')
 @click.option(
