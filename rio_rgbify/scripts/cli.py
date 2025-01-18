@@ -161,15 +161,11 @@ def rgbify(
     help="Configuration file"
 )
 @click.option(
-    "--output-path", "-o", type=str, default="output.mbtiles",
-    help="Path to the output mbtiles."
-)
-@click.option(
     "-j", "--workers", type=int, default=None,
     help="Number of processes to use for parallel execution."
 )
 @click.option("--verbose", "-v", is_flag=True, default=False)
-def merge(config, output_path, workers, verbose):
+def merge(config, workers, verbose):
     """Merge multiple MBTiles files."""
     try:
         with open(config) as f:
@@ -214,7 +210,7 @@ def merge(config, output_path, workers, verbose):
         if output_type.lower() == 'mbtiles':
             merger = TerrainRGBMerger(
                 sources,
-                output_path=output_path,
+                output_path=config.get('output_path', 'output.mbtiles'),
                 output_encoding=EncodingType(config.get('output_encoding', "mapbox").lower()),
                 output_image_format=ImageFormat(config.get('output_format', 'webp').lower()),
                 resampling=Resampling[config.get('resampling', 'lanczos').lower()],
@@ -228,7 +224,7 @@ def merge(config, output_path, workers, verbose):
         elif output_type.lower() == 'raster':
             merger = RasterRGBMerger(
                 sources,
-                output_path=output_path,
+                output_path=config.get('output_path', 'output.mbtiles'),
                 output_encoding=EncodingType(config.get('output_encoding', "mapbox").lower()),
                 output_image_format=ImageFormat(config.get('output_format', 'webp').lower()),
                 resampling=Resampling[config.get('resampling', 'lanczos').lower()],
