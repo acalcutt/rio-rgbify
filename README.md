@@ -9,13 +9,12 @@
 > pip install rio-rgbify-merge
 > ```
 >
-> **This branch produces incorrect merges.** Layer priority is inverted here:
-> the *first* source wins instead of the last, so a coarse global source paints
-> over the detailed one — and because a missing tile falls back to a parent, all
-> detail above the coarse source's max zoom is lost with it. Fixed in the new
-> repository. Anything built from this branch should be rebuilt.
+> The layer-priority fix is on every branch here, so anything still cloning this
+> repository produces correct merges. Everything else — the release pipeline, the
+> packaging fixes, the missing `numpy` and `psutil` dependencies — is only in the
+> new repository.
 >
-> This repository is archived and read-only.
+> This repository is archived and read-only. No further work will happen here.
 
 # rio-rgbify
 Encode arbitrary bit depth rasters in pseudo base-256 as RGB
@@ -23,7 +22,7 @@ Encode arbitrary bit depth rasters in pseudo base-256 as RGB
 ## Installation
 
 ```
-git clone https://github.com/acalcutt/rio-rgbify.git
+git clone https://github.com/TechIdiots-LLC/rio-rgbify-merge.git
 
 cd rio-rgbify
 
