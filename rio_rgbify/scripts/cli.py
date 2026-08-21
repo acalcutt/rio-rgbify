@@ -93,7 +93,7 @@ def main_group():
     help="Number of tiles to process at a time in each process."
 )
 @click.option(
-    "--resampling", type=click.Choice(["nearest", "bilinear", "cubic", "cubic_spline", "lanczos", "average", "mode", "gaussian"], case_sensitive=False), default="nearest",
+    "--resampling", type=click.Choice(["nearest", "bilinear", "cubic", "cubic_spline", "lanczos", "average", "mode", "gauss"], case_sensitive=False), default="nearest",
     help="Resampling method"
 )
 # @click.pass_context

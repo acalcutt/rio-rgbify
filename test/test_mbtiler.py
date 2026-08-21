@@ -8,10 +8,11 @@ import pytest
 import rasterio
 import numpy as np
 from rasterio import Affine
-from rio_rgbify.mbtiler import (_encode_as_webp, _encode_as_png, _make_tiles, _tile_range, RGBTiler)
+from rio_rgbify.mbtiler import RGBTiler
 
 in_elev_src = os.path.join(os.path.dirname(__file__), "fixtures", "elev.tif")
 
+@pytest.mark.skip(reason="_make_tiles removed in mbtiler rewrite")
 @given(
     st.integers(
         min_value=0, max_value=(2 ** 10 - 1)
@@ -39,6 +40,7 @@ def test_make_tiles_tile_bounds(x, y):
     assert len(created_tiles) == 85
 
 
+@pytest.mark.skip(reason="_tile_range removed in mbtiler rewrite")
 @given(
     st.lists(
         elements=st.integers(min_value=0, max_value=99),
@@ -57,6 +59,7 @@ def test_tile_range(mintile, maxtile):
     assert expected_length == len(list(_tile_range(mintile, maxtile)))
 
 
+@pytest.mark.skip(reason="_encode_as_webp removed in mbtiler rewrite")
 def test_webp_writer():
     test_data = np.zeros((3, 256, 256), dtype=np.uint8)
 
@@ -74,6 +77,7 @@ def test_webp_writer():
     assert len(test_bytearray) < len(test_bytearray_complex)
 
 
+@pytest.mark.skip(reason="_encode_as_png removed in mbtiler rewrite")
 def test_file_writer():
     test_data = np.zeros((3, 256, 256), dtype=np.uint8)
 
@@ -102,6 +106,7 @@ def test_file_writer():
     assert len(test_bytearray) < len(test_bytearray_complex)
 
 
+@pytest.mark.skip(reason="_encode_as_webp removed in mbtiler rewrite")
 def test_webp_writer_fails_dtype():
     test_data = np.zeros((3, 256, 256), dtype=np.float64)
 
@@ -109,6 +114,7 @@ def test_webp_writer_fails_dtype():
         _encode_as_webp(test_data)
 
 
+@pytest.mark.skip(reason="_encode_as_png removed in mbtiler rewrite")
 def test_png_writer_fails_dtype():
     test_data = np.zeros((3, 256, 256), dtype=np.float64)
 
@@ -116,6 +122,7 @@ def test_png_writer_fails_dtype():
         _encode_as_png(test_data)
 
 
+@pytest.mark.skip(reason="Format validation moved to CLI click.Choice; RGBTiler no longer raises ValueError on bad format in __init__")
 def test_RGBtiler_format_fails():
     test_in = 'i/do/not/exist.tif'
     test_out = 'nor/do/i.tif'

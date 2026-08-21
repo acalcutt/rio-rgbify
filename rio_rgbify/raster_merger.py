@@ -1,7 +1,8 @@
 import sqlite3
+import math
 import rasterio
 import mercantile
-from rasterio.warp import reproject, Resampling
+from rasterio.warp import reproject, Resampling, transform_bounds
 import numpy as np
 import io
 from PIL import Image
@@ -11,7 +12,6 @@ import logging
 from enum import Enum
 from dataclasses import dataclass, field
 from typing import List, Optional, Dict, Tuple
-from typing import Optional, Tuple, List, Dict
 from contextlib import contextmanager
 from rio_rgbify.database import MBTilesDatabase
 from rio_rgbify.image import ImageFormat, ImageEncoder
@@ -74,7 +74,7 @@ class RasterRGBMerger:
                  resampling=Resampling.lanczos, processes=None, default_tile_size=512,
                  output_image_format=ImageFormat.PNG,
                  min_zoom=0, max_zoom=None, bounds=None, gaussian_blur_sigma=0.2, base_val=-10000, interval=0.1,
-                 bounds_source=None):
+                 bounds_source=None, sparse_tiles=False):
         self.sources = sources
         self.output_path = Path(output_path)
         self.output_encoding = output_encoding
@@ -92,6 +92,7 @@ class RasterRGBMerger:
         self.base_val = base_val # Store the base_val for mapbox output
         self.interval = interval # store the interval for mapbox output
         self.bounds_source = bounds_source # Store the bounds_source parameter
+        self.sparse_tiles = sparse_tiles
         """
         Initializes the RasterRGBMerger.
 
@@ -130,12 +131,17 @@ class RasterRGBMerger:
     def _extract_tile(self, source: RasterSource, tile: mercantile.Tile, source_index: int, verbose=False) -> Optional[TileData]:
         """Extract and decode a tile from a Raster, with no fallback to parent tiles"""
         
-        bounds = mercantile.bounds(tile)
+        bounds = mercantile.bounds(tile)  # WGS84 lon/lat
         
         try:
             with rasterio.open(source.path) as src:
-                
-                window = rasterio.windows.from_bounds(*bounds, transform=src.transform)
+                # Convert tile bounds to source CRS so the window is computed correctly
+                if src.crs and src.crs.to_epsg() != 4326:
+                    src_bounds = transform_bounds("EPSG:4326", src.crs, bounds.west, bounds.south, bounds.east, bounds.north)
+                else:
+                    src_bounds = (bounds.west, bounds.south, bounds.east, bounds.north)
+
+                window = rasterio.windows.from_bounds(*src_bounds, transform=src.transform)
                 
                 data = src.read(window=window, masked=True).astype(np.float32)
                 
@@ -147,16 +153,19 @@ class RasterRGBMerger:
                 #Apply height adjustment
                 data += source.height_adjustment
                 
+                data_height, data_width = data.shape
+
                 meta = src.meta.copy()
-                
                 meta.update({
                     'count': 1,
                     'dtype': rasterio.float32,
                     'driver': 'GTiff',
                     'crs': 'EPSG:3857',
+                    'width': data_width,
+                    'height': data_height,
                     'transform': rasterio.transform.from_bounds(
                         bounds.west, bounds.south, bounds.east, bounds.north,
-                        meta['width'], meta['height']
+                        data_width, data_height
                     )
                 })
 
@@ -170,6 +179,18 @@ class RasterRGBMerger:
         """Merge tiles from multiple sources, handling upscaling and priorities"""
         if not any(tile_datas):
             return None
+
+        # Sparse tiles: skip this tile if no source has native data at the target zoom.
+        # Tiles where every pixel is NaN (fully masked) are treated as having no data.
+        if self.sparse_tiles:
+            has_native_with_data = any(
+                td is not None
+                and td.source_zoom == target_tile.z
+                and not np.all(np.isnan(td.data))
+                for td in tile_datas
+            )
+            if not has_native_with_data:
+                return None
         
         bounds = mercantile.bounds(target_tile)
         
@@ -256,7 +277,7 @@ class RasterRGBMerger:
         else:
             return tile_data.data
     
-    def process_tile(self, tile: mercantile.Tile, source_conns: Dict[Path, sqlite3.Connection], write_queue: Queue, verbose:bool=False) -> None:
+    def process_tile(self, tile: mercantile.Tile, write_queue: Queue, verbose: bool = False) -> None:
         """Process a single tile, merging data from multiple sources"""
         #print(f"process_tile called with tile: ")
         try:
@@ -318,29 +339,22 @@ class RasterRGBMerger:
         return list(tiles)
 
     def get_max_zoom_level(self) -> int:
-        """Get the maximum zoom level from the last source"""
-        # Get tiles from the specified source, or the last one if it does not exist
+        """Get the maximum zoom level from the last source based on pixel resolution"""
         if self.bounds_source is not None and 0 <= self.bounds_source < len(self.sources):
             source = self.sources[self.bounds_source]
         else:
             source = self.sources[-1]
         with rasterio.open(source.path) as src:
-            
-            bounds = src.bounds
-            
-            max_zoom = mercantile.tile(bounds.west, bounds.north, self.min_zoom).z
-            
-            while True:
-                test_zoom = max_zoom + 1
-                test_tile = mercantile.tile(bounds.west, bounds.north, test_zoom)
-                test_bounds = mercantile.bounds(test_tile)
-                
-                if test_bounds.west < bounds.west or test_bounds.south < bounds.south or test_bounds.east > bounds.east or test_bounds.north > bounds.north:
-                    break
-                else:
-                    max_zoom = test_zoom
-            
-            return max_zoom
+            if src.crs and src.crs.to_epsg() != 4326:
+                wgs84_bounds = transform_bounds(src.crs, "EPSG:4326", *src.bounds)
+                pixel_size_lon = (wgs84_bounds[2] - wgs84_bounds[0]) / src.width
+            else:
+                pixel_size_lon = abs(src.transform[0])
+
+            # Find the zoom level where one tile pixel ≈ one source pixel:
+            # tile_pixel_size = 360 / (2^z * tile_size) => z = log2(360 / (tile_size * pixel_size_lon))
+            native_zoom = int(math.log2(360.0 / (self.default_tile_size * pixel_size_lon)))
+            return max(self.min_zoom, native_zoom)
 
     def process_all(self, min_zoom: int = 0, verbose=False):
         """Process all zoom levels"""
@@ -350,8 +364,8 @@ class RasterRGBMerger:
         with MBTilesDatabase(self.output_path) as db:
             db.add_bounds_center_metadata(self.bounds, self.min_zoom, max_zoom, self.output_encoding.value, self.output_image_format.value, "Merged Raster")
 
-            for zoom in range(min_zoom, max_zoom + 1):
-                self.process_zoom_level(zoom, verbose)
+        for zoom in range(min_zoom, max_zoom + 1):
+            self.process_zoom_level(zoom, verbose)
 
         self.logger.info("Completed processing all zoom levels")
 
@@ -371,7 +385,9 @@ class RasterRGBMerger:
                  for s in self.sources],
                 self.output_path,
                 self.output_encoding.value,
+                self.output_nodata,
                 self.resampling,
+                self.sparse_tiles,
                 self.output_image_format.value,
                 self.base_val,
                 self.interval,
@@ -392,7 +408,7 @@ class RasterRGBMerger:
 @retry(attempts=5, base_delay=0.5, max_delay=5)
 def process_tile_task(task_tuple: tuple) -> None:
     """Standalone function for processing tiles that can be pickled"""
-    tile, source_configs, output_path, output_encoding, resampling, output_format, base_val, interval, verbose = task_tuple
+    tile, source_configs, output_path, output_encoding, output_nodata, resampling, sparse_tiles, output_format, base_val, interval, verbose = task_tuple
 
     # Configure logging for each process
     logger = logging.getLogger(__name__)
@@ -410,7 +426,7 @@ def process_tile_task(task_tuple: tuple) -> None:
             sources.append(source)
 
         # create instance
-        merger_instance = RasterRGBMerger(sources, output_path, output_encoding=EncodingType(output_encoding), resampling=resampling, output_image_format=ImageFormat(output_format), base_val=base_val, interval=interval)
+        merger_instance = RasterRGBMerger(sources, output_path, output_encoding=EncodingType(output_encoding), output_nodata=output_nodata, resampling=resampling, sparse_tiles=sparse_tiles, output_image_format=ImageFormat(output_format), base_val=base_val, interval=interval)
 
         # Open database connection for the entire task
         with MBTilesDatabase(output_path) as db:

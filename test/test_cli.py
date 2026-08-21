@@ -4,9 +4,11 @@ import click
 from click.testing import CliRunner
 
 import numpy as np
+import pytest
 
 import rasterio as rio
-from rio_rgbify.scripts.cli import cli, rgbify, merge
+from rio_rgbify.scripts.cli import main_group as cli, rgbify, merge
+from rio_rgbify.database import MBTilesDatabase
 
 from raster_tester.compare import affaux, upsample_array
 
@@ -34,6 +36,7 @@ def flex_compare(r1, r2, thresh=10):
     return not np.any(tdiff > thresh)
 
 
+@pytest.mark.skip(reason="Single-file GeoTIFF output mode removed in rewrite; rgbify now always writes MBTiles and requires --min-z/--max-z")
 def test_cli_good_elev():
     runner = CliRunner()
     with runner.isolated_filesystem():
@@ -327,9 +330,11 @@ def test_merge_command():
         with open("config.json", "w") as f:
             json.dump(config_data, f)
 
-        # Create dummy mbtiles files
-        open("test1.mbtiles", "w").close()
-        open("test2.mbtiles", "w").close()
+        # Create valid (empty) MBTiles databases so merger can query them
+        with MBTilesDatabase("test1.mbtiles") as _:
+            pass
+        with MBTilesDatabase("test2.mbtiles") as _:
+            pass
 
         result = runner.invoke(
             cli,

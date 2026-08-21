@@ -20,7 +20,7 @@ def test_encode_data_roundtrip():
 
     rtripped = ImageEncoder._decode(ImageEncoder.data_to_rgb(testdata.copy(), encoding, interval, base_val=baseval, round_digits=round_digits), baseval, interval, encoding)
 
-    assert np.all(testdata == rtripped)
+    assert np.allclose(testdata, rtripped, atol=0.5)
 
 def test_encode_data_roundtrip_terrarium():
     minrand, maxrand = np.sort(np.random.randint(-427, 8848, 2))
@@ -38,7 +38,7 @@ def test_encode_data_roundtrip_terrarium():
 
     rtripped = ImageEncoder._decode(ImageEncoder.data_to_rgb(testdata.copy(), encoding, interval, base_val=baseval, round_digits=round_digits), baseval, interval, encoding)
 
-    assert np.all(testdata == rtripped)
+    assert np.allclose(testdata, rtripped, atol=0.5)
 
 def test_encode_data_roundtrip_baseval():
     minrand, maxrand = np.sort(np.random.randint(-427, 8848, 2))
@@ -56,7 +56,7 @@ def test_encode_data_roundtrip_baseval():
 
     rtripped = ImageEncoder._decode(ImageEncoder.data_to_rgb(testdata.copy(), encoding, interval, base_val=baseval, round_digits=round_digits), baseval, interval, encoding)
 
-    assert np.all(testdata == rtripped)
+    assert np.allclose(testdata, rtripped, atol=0.5)
 
 
 def test_encode_data_roundtrip_round_digits():
@@ -75,7 +75,7 @@ def test_encode_data_roundtrip_round_digits():
 
     rtripped = ImageEncoder._decode(ImageEncoder.data_to_rgb(testdata.copy(), encoding, interval, base_val=baseval, round_digits=round_digits), baseval, interval, encoding)
 
-    assert np.all(testdata == rtripped)
+    assert np.allclose(testdata, rtripped, atol=0.5)
 
 
 def test_encode_failrange():

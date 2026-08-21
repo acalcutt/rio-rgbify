@@ -1,0 +1,56 @@
+name: Tests
+
+on:
+  push:
+    branches: ["**"]
+  pull_request:
+    branches: ["**"]
+
+jobs:
+  test:
+    name: Python ${{ matrix.python-version }} / ${{ matrix.os }}
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest]
+        python-version: ["3.10", "3.11", "3.12"]
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Python ${{ matrix.python-version }}
+        uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix.python-version }}
+
+      # conda-incubator/setup-miniconda gives us a clean way to get rasterio
+      # binaries without needing to compile GDAL from scratch on the runner.
+      - name: Set up Conda
+        uses: conda-incubator/setup-miniconda@v3
+        with:
+          python-version: ${{ matrix.python-version }}
+          activate-environment: rio-rgbify-test
+          auto-activate-base: false
+
+      - name: Install GDAL / rasterio via conda
+        shell: bash -el {0}
+        run: |
+          conda install -y -c conda-forge rasterio scipy
+
+      - name: Install package and test dependencies
+        shell: bash -el {0}
+        run: |
+          pip install -e ".[test]"
+          pip install hypothesis scipy mercantile Pillow pytest pytest-cov psutil
+
+      - name: Run tests
+        shell: bash -el {0}
+        run: |
+          pytest test/ -v --tb=short --cov=rio_rgbify --cov-report=term-missing
+
+      - name: Upload coverage to Codecov
+        if: matrix.python-version == '3.11' && matrix.os == 'ubuntu-latest'
+        uses: codecov/codecov-action@v4
+        with:
+          fail_ci_if_error: false

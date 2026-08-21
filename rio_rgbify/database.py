@@ -129,7 +129,7 @@ class MBTilesDatabase:
         )
 
         self.cur.execute(
-            "INSERT INTO tiles_shallow "
+            "INSERT OR REPLACE INTO tiles_shallow "
             "(TILES_COL_Z, TILES_COL_X, TILES_COL_Y, TILES_COL_DATA_ID) "
             "VALUES (?, ?, ?, ?);",
             (z, x, y, tileDataId),

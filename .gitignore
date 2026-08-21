@@ -66,3 +66,5 @@ docs/notebooks/.ipynb_checkpoints/*
 .pytest_cache
 .hypothesis
 .coverage*
+
+PR_DESCRIPTION.txt

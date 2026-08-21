@@ -1,4 +1,7 @@
 # rio-rgbify
+
+> **Fork:** This is a fork of [mapbox/rio-rgbify](https://github.com/mapbox/rio-rgbify), maintained by TechIdiots LLC under the same MIT License.
+
 Encode arbitrary bit depth rasters in pseudo base-256 as RGB
 
 ## Installation
