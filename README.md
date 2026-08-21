@@ -9,14 +9,12 @@
 > pip install rio-rgbify-merge
 > ```
 >
-> The layer-priority fix (#8) is included in the new repository, along with the
-> release pipeline and packaging fixes. No further work will happen here.
+> The layer-priority fix is on every branch here, so anything still cloning this
+> repository produces correct merges. Everything else — the release pipeline, the
+> packaging fixes, the missing `numpy` and `psutil` dependencies — is only in the
+> new repository.
 >
-> Note that the **`merge` branch was never fixed** and still inverts layer
-> priority — the first source wins instead of the last, so a coarse global source
-> paints over the detailed one. Anything built from that branch should be rebuilt.
->
-> This repository is archived and read-only.
+> This repository is archived and read-only. No further work will happen here.
 
 # rio-rgbify
 
@@ -27,7 +25,7 @@ Encode arbitrary bit depth rasters in pseudo base-256 as RGB
 ## Installation
 
 ```
-git clone https://github.com/acalcutt/rio-rgbify.git
+git clone https://github.com/TechIdiots-LLC/rio-rgbify-merge.git
 
 cd rio-rgbify
 
