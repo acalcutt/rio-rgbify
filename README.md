@@ -1,3 +1,23 @@
+> # ⚠️ Moved
+>
+> This repository has moved to
+> **[TechIdiots-LLC/rio-rgbify-merge](https://github.com/TechIdiots-LLC/rio-rgbify-merge)**,
+> and is published on PyPI as
+> **[`rio-rgbify-merge`](https://pypi.org/project/rio-rgbify-merge/)**.
+>
+> ```
+> pip install rio-rgbify-merge
+> ```
+>
+> The layer-priority fix (#8) is included in the new repository, along with the
+> release pipeline and packaging fixes. No further work will happen here.
+>
+> Note that the **`merge` branch was never fixed** and still inverts layer
+> priority — the first source wins instead of the last, so a coarse global source
+> paints over the detailed one. Anything built from that branch should be rebuilt.
+>
+> This repository is archived and read-only.
+
 # rio-rgbify
 
 > **Fork:** This is a fork of [mapbox/rio-rgbify](https://github.com/mapbox/rio-rgbify), maintained by TechIdiots LLC under the same MIT License.
