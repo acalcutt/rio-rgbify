@@ -1,0 +1,237 @@
+name: Create bump version PR
+
+on:
+  workflow_dispatch:
+    inputs:
+      version:
+        description: Version bump type.
+        required: true
+        type: choice
+        options:
+          - patch
+          - minor
+          - major
+          - prepatch
+          - preminor
+          - premajor
+          - prerelease
+      preid:
+        description: Prerelease identifier (e.g., 'a', 'b', 'rc'). Only used with pre* version types.
+        required: false
+        type: string
+        default: 'rc'
+
+permissions:
+  contents: write
+  pull-requests: write
+
+jobs:
+  bump-version-pr:
+    name: Bump version PR
+    runs-on: ubuntu-latest
+
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+
+      - name: Create bump script
+        run: |
+          cat > bump-version.py << 'PYEOF'
+          import re, sys, os, subprocess, json
+
+          version_type = sys.argv[1]
+          preid = sys.argv[2] if len(sys.argv) > 2 and sys.argv[2].strip() else 'rc'
+          init_path = 'rio_rgbify/__init__.py'
+          changelog_path = 'CHANGELOG.md'
+
+          # ── Read current version from rio_rgbify/__init__.py ────────────────────
+          init_content = open(init_path).read()
+          m = re.search(r'__version__\s*=\s*["\']([^"\']+)["\']', init_content)
+          if not m:
+              raise RuntimeError("Could not find __version__ in rio_rgbify/__init__.py")
+          current = m.group(1)
+          print(f"Current version: {current}")
+
+          # ── Parse version (supports X.Y.Z and X.Y.ZrcN / X.Y.ZaN / X.Y.ZbN) ──
+          pre_match = re.match(r'^(\d+)\.(\d+)\.(\d+)(a|b|rc)(\d+)$', current)
+          rel_match = re.match(r'^(\d+)\.(\d+)\.(\d+)$', current)
+
+          if pre_match:
+              major, minor, patch, pre_tag, pre_num = (
+                  int(pre_match.group(1)), int(pre_match.group(2)),
+                  int(pre_match.group(3)), pre_match.group(4), int(pre_match.group(5))
+              )
+              is_pre = True
+          elif rel_match:
+              major, minor, patch = int(rel_match.group(1)), int(rel_match.group(2)), int(rel_match.group(3))
+              pre_tag, pre_num = None, 0
+              is_pre = False
+          else:
+              raise RuntimeError(f"Unrecognised version format: {current}")
+
+          # ── Compute new version ──────────────────────────────────────────────────
+          if version_type == 'patch':
+              new_version = f"{major}.{minor}.{patch + (0 if is_pre else 1)}"
+              if is_pre:
+                  new_version = f"{major}.{minor}.{patch}"  # finalise pre-release
+          elif version_type == 'minor':
+              if is_pre:
+                  new_version = f"{major}.{minor}.0"
+              else:
+                  new_version = f"{major}.{minor + 1}.0"
+          elif version_type == 'major':
+              if is_pre:
+                  new_version = f"{major}.0.0"
+              else:
+                  new_version = f"{major + 1}.0.0"
+          elif version_type == 'prepatch':
+              new_version = f"{major}.{minor}.{patch + 1}{preid}1"
+          elif version_type == 'preminor':
+              new_version = f"{major}.{minor + 1}.0{preid}1"
+          elif version_type == 'premajor':
+              new_version = f"{major + 1}.0.0{preid}1"
+          elif version_type == 'prerelease':
+              if is_pre:
+                  new_version = f"{major}.{minor}.{patch}{pre_tag}{pre_num + 1}"
+              else:
+                  new_version = f"{major}.{minor}.{patch + 1}{preid}1"
+          else:
+              raise RuntimeError(f"Unknown version type: {version_type}")
+
+          print(f"New version: {new_version}")
+
+          # ── Update rio_rgbify/__init__.py ────────────────────────────────────────
+          new_init = re.sub(
+              r'(__version__\s*=\s*["\'])[^"\']+(["\'])',
+              rf'\g<1>{new_version}\2',
+              init_content
+          )
+          open(init_path, 'w').write(new_init)
+          print(f"Updated {init_path}")
+
+          # ── Update CHANGELOG.md ──────────────────────────────────────────────────
+          if not os.path.exists(changelog_path):
+              print("No CHANGELOG.md found, skipping")
+              with open(os.environ['GITHUB_OUTPUT'], 'a') as f:
+                  f.write(f"version={new_version}\n")
+              sys.exit(0)
+
+          changelog = open(changelog_path).read()
+
+          # Collect PRs since last tag that aren't already in the changelog
+          missing_entries = []
+          try:
+              latest_tag = subprocess.check_output(
+                  ['git', 'describe', '--tags', '--abbrev=0'], text=True).strip()
+              print(f"Latest tag: {latest_tag}")
+              commit_range = f"{latest_tag}..HEAD"
+          except subprocess.CalledProcessError:
+              print("No previous tags found, using all commits")
+              commit_range = 'HEAD'
+
+          try:
+              commits = subprocess.check_output(
+                  ['git', 'log', commit_range, '--oneline'], text=True)
+          except subprocess.CalledProcessError:
+              commits = ''
+
+          pr_numbers = re.findall(r'#(\d+)', commits)
+          missing_prs = [n for n in pr_numbers if f'#{n}' not in changelog]
+          print(f"Found {len(missing_prs)} new PRs to add to changelog")
+
+          if missing_prs:
+              try:
+                  remote_url = subprocess.check_output(
+                      ['git', 'config', '--get', 'remote.origin.url'], text=True).strip()
+                  repo_match = re.search(r'github\.com[:/](.+?)(?:\.git)?$', remote_url)
+                  repo_full = repo_match.group(1) if repo_match else None
+              except Exception:
+                  repo_full = None
+
+              for pr_num in missing_prs:
+                  try:
+                      pr_json = subprocess.check_output(
+                          ['gh', 'pr', 'view', pr_num, '--json', 'title,author,number'], text=True)
+                      pr = json.loads(pr_json)
+                      if 'dependabot' in pr['author']['login']:
+                          continue
+                      pr_url = f"https://github.com/{repo_full}/pull/{pr['number']}" if repo_full else f"#{pr['number']}"
+                      entry = f"- {pr['title']} ([#{pr['number']}]({pr_url})) (@{pr['author']['login']})"
+                      missing_entries.append(entry)
+                      print(f"Added: {entry}")
+                  except Exception as e:
+                      print(f"Could not fetch PR #{pr_num}: {e}")
+
+          # Replace "## master" heading with the new version
+          changelog = changelog.replace('## master', f'## {new_version}', 1)
+
+          # Remove placeholder lines
+          changelog = changelog.replace('- _...Add new stuff here..._\n', '')
+
+          # Build new master section
+          master_section = '\n'.join([
+              '## master',
+              '### ✨ Features and improvements',
+              '- _...Add new stuff here..._',
+              '',
+              '### 🐞 Bug fixes',
+              '- _...Add new stuff here..._',
+              '',
+              '',
+          ])
+
+          # Split off the title line ("# Changelog\n\n") and prepend master section
+          title_match = re.match(r'^(# .+?\n\n)', changelog)
+          if title_match:
+              title = title_match.group(1)
+              rest = changelog[len(title):]
+          else:
+              title = ''
+              rest = changelog
+
+          # Insert missing PR entries into the Bug fixes block of the new version section
+          if missing_entries:
+              bug_fix_pattern = re.compile(
+                  r'^(## [^\n]+\n### ✨ Features and improvements\n(?:.*\n)*?### 🐞 Bug fixes\n)',
+                  re.MULTILINE)
+              bf_match = bug_fix_pattern.search(rest)
+              if bf_match:
+                  insert_at = bf_match.end()
+                  entries_text = '\n' + '\n'.join(missing_entries) + '\n'
+                  rest = rest[:insert_at] + entries_text + rest[insert_at:]
+              else:
+                  rest = rest + '\n' + '\n'.join(missing_entries) + '\n'
+
+          changelog = title + master_section + rest
+          open(changelog_path, 'w').write(changelog)
+          print("Updated CHANGELOG.md")
+
+          with open(os.environ['GITHUB_OUTPUT'], 'a') as f:
+              f.write(f"version={new_version}\n")
+          PYEOF
+
+      - name: Bump version and update changelog
+        id: version-details
+        run: |
+          python bump-version.py "${{ inputs.version }}" "${{ inputs.preid }}"
+          rm bump-version.py
+        env:
+          GH_TOKEN: ${{ github.token }}
+
+      - name: Create Pull Request
+        uses: peter-evans/create-pull-request@v7
+        with:
+          commit-message: Release v${{ steps.version-details.outputs.version }}
+          branch: release-v${{ steps.version-details.outputs.version }}
+          title: Release v${{ steps.version-details.outputs.version }}
+          body: |
+            Automated version bump to `v${{ steps.version-details.outputs.version }}`.
+
+            Review the CHANGELOG.md entries before merging. Once merged, trigger the **Build, Publish Docker and GitHub Release** workflow to publish.
+          labels: release
